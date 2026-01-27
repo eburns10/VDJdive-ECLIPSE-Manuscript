@@ -1,2 +1,2 @@
-# VDJdive-tcrEclipse-Manuscript
-Code used in the VDJdive/tcrEclipse Methods Manuscript
+# VDJdive-ECLIPSE-Manuscript
+Code used in the VDJdive/ECLIPSE Methods Manuscript
