@@ -75,7 +75,7 @@ cd8s@meta.data <- cd8s@meta.data %>% mutate(suitable = case_when(
 cd8s@meta.data <- cd8s@meta.data %>% filter(suitable) %>% distinct(Cell_barcode) %>% mutate(pos = sample.int(n())) %>% right_join(cd8s@meta.data, by = "Cell_barcode")
 
 ### Running the pro-processing of ECLIPSE. Pre is just all the cleaning, and then returns the output
-threeA <- pre(folders = dirs, file_type = "all", seurat_object = cd8, batch = "index", donor = "donor", group = "tissue", original_barcode = "Cell_Barcode", write_folder = "/home/ecb86/Desktop/braun/tcrEclipse/braun_cCell/tcr_temp", mode = "standard", format = "Blank")
+threeA <- pre(folders = dirs, file_type = "all", seurat_object = cd8, batch = "index", donor = "donor", group = "tissue", original_barcode = "Cell_Barcode", write_folder = "/home/Desktop/braun/tcrEclipse/braun_cCell/tcr_temp", mode = "standard", format = "Blank")
 
 ### Extracting the outputs from pre.
 contigs <- threeA[[1]]
@@ -191,7 +191,7 @@ contigs3 <- rbind(contigs, new_contigs)
 contigs3 <- contigs3 %>% select(-pos, -key) %>% ungroup()
 
 ### Running the second half after the 500 new chains were added
-pst2 <- post(folders = dirs, all = contigs3, seurat_object = obj, batch = "index", donor = "donor", group = "tissue", original_barcode = "Cell_Barcode", write_folder = "/home/ecb86/Desktop/braun/tcrEclipse/braun_cCell/tcr_temp", mode = "standard")
+pst2 <- post(folders = dirs, all = contigs3, seurat_object = obj, batch = "index", donor = "donor", group = "tissue", original_barcode = "Cell_Barcode", write_folder = "/home/Desktop/braun/tcrEclipse/braun_cCell/tcr_temp", mode = "standard")
 pst2 <- pst2 %>% select(Cell_barcode, "new_CTaa" = CTaa, "new_scrCTaa" = scR_CTaa, "newCloneCall" = cloneCallSource)
 
 ### adding the results to the original results
