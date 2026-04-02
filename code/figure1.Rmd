@@ -18,8 +18,8 @@ library(readxl)
 library(ggpubr)
 library(ggsci)
 
-source("/home/ecb86/Desktop/R_tools/ECLIPSE.R")
-source("/home/ecb86/Desktop/R_tools/VDJdive_ECLIPSE_paperFunctions.R")
+source("/home/Desktop/R_tools/ECLIPSE.R")
+source("/home/Desktop/R_tools/VDJdive_ECLIPSE_paperFunctions.R")
 ```
 
 
@@ -27,7 +27,7 @@ source("/home/ecb86/Desktop/R_tools/VDJdive_ECLIPSE_paperFunctions.R")
 ############################################################################
 ###                         Pre-Processing                               ###
 ############################################################################
-braun <- readRDS("/home/ecb86/Desktop/braun/rotation/Braun_cancer_cell/scRCC_SeuratObject.rds")
+braun <- readRDS("/home/Desktop/braun/rotation/Braun_cancer_cell/scRCC_SeuratObject.rds")
 
 braun@meta.data <- braun@meta.data %>% separate(Sample, into = c("donor", "tissue"), remove = FALSE, sep = "_")
 braun@meta.data <- braun@meta.data %>% mutate(tissue = case_when(
@@ -37,11 +37,11 @@ braun@meta.data <- braun@meta.data %>% mutate(tissue = case_when(
 
 cd8 <- subset(braun, subset = ClusterName_TCells %in% c("Treg", "Activated CD4.1", "Activated CD4.2", "CD4 TCM.1", "CD4 TCM.2", "Mito-high T cells", "-1"), invert = TRUE)
 
-dirs <- list.files("/gpfs/gibbs/pi/braun/ecb86/braun_cancerCell/realignment", recursive = TRUE, pattern = "all_contig_annotations\\.csv$", full.names = TRUE)
+dirs <- list.files("/gpfs/gibbs/pi/braun/braun_cancerCell/realignment", recursive = TRUE, pattern = "all_contig_annotations\\.csv$", full.names = TRUE)
 dirs <- dirs[!str_detect(dirs, "SC_VDJ_ASSEMBLER_CS")]
 dirs <- str_replace(dirs, "all.*$", "")
 
-matching <- read.csv("/home/ecb86/project/david/sc_datasets/braun_cancer_cell/braun_matching2.csv")
+matching <- read.csv("/home/project/david/sc_datasets/braun_cancer_cell/braun_matching2.csv")
 matching <- matching %>% filter(Sample != "")
 
 cd8@meta.data <- cd8@meta.data %>% left_join(matching[, 2:3], by = "Sample")
@@ -76,7 +76,7 @@ DimPlot(cd8, group.by = "clusters2", pt.size = 1) +
         theme_void() + ggtitle("") + theme(legend.position = "bottom", legend.text = element_text(face = "bold", size = 10)) +
         guides(color = guide_legend(nrow = 2, override.aes = list(size = 5), keywidth = 0.01)) +
         scale_color_npg()
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/1a.png", width = 1400, height = 1400, units = "px")
+
 
 ```
 
@@ -104,7 +104,7 @@ FetchData(cd8_all, c("umap_1", "umap_2", "chain_count2")) %>% ggplot() +
                                                                     legend.title.position = "top") +
                                                               scale_color_manual(values = c("grey80", "limegreen", "skyblue3", "orange", "darkred"), limits = c("0", "1", "2", "3", "4+")) +
                                                               guides(color = guide_legend(nrow = 1, override.aes = list(size = 8), keywidth = 0.01))
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/1b1.png", width = 1400, height = 1400, units = "px")
+
 
 
 chains <- FetchData(cd8_all, c("umap_1", "umap_2", "chain_count2")) %>% mutate(size = nrow(cd8@meta.data)) %>%
@@ -122,7 +122,6 @@ chains %>% ggplot() +
                  legend.text = element_text(face = "bold", size = 8), legend.position = "none", panel.border = element_rect(color = "black", fill = NA, linewidth = 1.5),
                  axis.line = element_blank(), plot.margin = unit(c(0.5, 0.8, 0.5, 0.5), "cm"), plot.title = element_text(size = 16, face = "bold", hjust = 0.5))
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/1b2.png", width = 1400, height = 420, units = "px")
 
 ```
 
@@ -167,7 +166,6 @@ df %>% ggplot() + geom_col(aes(x = reorder(donor, regularSize), y = pct, fill = 
                   guides(fill = guide_legend(nrow = 1))
 
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/1c.png", width = 2000, height = 1600, units = "px")
 
 
 ### Calculating percentages for text
@@ -225,7 +223,6 @@ FetchData(cd8_all, c("umap_1", "umap_2", "missing1")) %>% ggplot() +
 
 
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/1d1a.png", width = 1000, height = 1000, units = "px")
 
 meta <- FetchData(cd8_all, c("umap_1", "umap_2", "missing1", "clusters2")) %>% group_by(missing1) %>% mutate(total = n()) %>% 
                                                                                group_by(missing1, clusters2) %>% summarise(count = n(),
@@ -266,7 +263,6 @@ meta %>% ggplot(aes(x = new_x, y = pct, color = missing1)) +
          annotate("text", x = 1, y = 83, label = "bold(alpha[1])", parse = TRUE, hjust = 0, size = 6) + annotate("text", x = 1.25, y = 83, label = "= CIVRVYNTDKLIF", hjust = 0, size = 6) +
          annotate("text", x = 1, y = 76, label = "bold(beta[1])", parse = TRUE, hjust = 0, size = 6) + annotate("text", x = 1.25, y = 76, label = "= CASSMGTAYEQYF", hjust = 0, size = 6)
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/1d1b.png", width = 2000, height = 1600, units = "px")
 
 
 ### Sub Figure 2
@@ -281,7 +277,6 @@ FetchData(cd8_all, c("umap_1", "umap_2", "missing2")) %>% ggplot() +
                                                                              values = c("lightpink3", "orange4", "skyblue4")) +
                                                           guides(color = guide_legend(nrow = 3, override.aes = list(size = 5), title.position = "top", keywidth = 0.01))
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/1d2a.png", width = 1000, height = 1000, units = "px")
 
 meta <- FetchData(cd8_all, c("umap_1", "umap_2", "missing2", "clusters2")) %>% group_by(missing2) %>% mutate(total = n()) %>% 
                                                                                group_by(missing2, clusters2) %>% summarise(count = n(),
@@ -322,7 +317,6 @@ meta %>% ggplot(aes(x = new_x, y = pct, color = missing2)) +
          annotate("text", x = 3, y = 83, label = "bold(alpha[1])", parse = TRUE, hjust = 0, size = 6) + annotate("text", x = 3.25, y = 83, label = "= CALSHYGGATNKLIF", hjust = 0, size = 6) +
          annotate("text", x = 3, y = 76, label = "bold(beta[1])", parse = TRUE, hjust = 0, size = 6) + annotate("text", x = 3.25, y = 76, label = "= CASSLAFGARQLTFF", hjust = 0, size = 6)
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/1d2b.png", width = 2000, height = 1600, units = "px")
 
 
 
@@ -338,7 +332,7 @@ FetchData(cd8_all, c("umap_1", "umap_2", "missing3")) %>% ggplot() +
                                                                              values = c("lightpink3", "orange4")) +
                                                           guides(color = guide_legend(nrow = 3, override.aes = list(size = 5), title.position = "top", keywidth = 0.01))
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/1d3a.png", width = 1000, height = 1000, units = "px")
+
 
 meta <- FetchData(cd8_all, c("umap_1", "umap_2", "missing3", "clusters2")) %>% group_by(missing3) %>% mutate(total = n()) %>% 
                                                                                group_by(missing3, clusters2) %>% summarise(count = n(),
@@ -374,7 +368,7 @@ meta %>% ggplot(aes(x = new_x, y = pct, color = missing3)) +
          annotate("text", x = 1, y = 83, label = "bold(alpha[1])", parse = TRUE, hjust = 0, size = 6) + annotate("text", x = 1.25, y = 83, label = "= CAVRGRNSGAGSYQLTF", hjust = 0, size = 6) +
          annotate("text", x = 1, y = 76, label = "bold(beta[1])", parse = TRUE, hjust = 0, size = 6) + annotate("text", x = 1.25, y = 76, label = "= CASSQGGQFNQPQHF", hjust = 0, size = 6)
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/1d3b.png", width = 2000, height = 1600, units = "px")
+
 
 ```
 
@@ -400,7 +394,7 @@ FetchData(cd8_all, c("umap_1", "umap_2", "extra1")) %>% ggplot() +
                                                         guides(color = guide_legend(nrow = 3, override.aes = list(size = 5), title.position = "top", keywidth = 0.01))
 
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/1e1a.png", width = 1000, height = 1000, units = "px")
+
 
 meta <- FetchData(cd8_all, c("umap_1", "umap_2", "extra1", "clusters2")) %>% group_by(extra1) %>% mutate(total = n()) %>% 
                                                                              group_by(extra1, clusters2) %>% summarise(count = n(),
@@ -442,7 +436,7 @@ meta %>% ggplot(aes(x = new_x, y = pct, color = extra1)) +
          annotate("text", x = 1, y = 76, label = "bold(alpha[2])", parse = TRUE, hjust = 0, size = 6) + annotate("text", x = 1.3, y = 76, label = "= CAVRDVDSGAGSYQLTF", hjust = 0, size = 6) +
          annotate("text", x = 1, y = 69, label = "bold(beta[1])", parse = TRUE, hjust = 0, size = 6) + annotate("text", x = 1.3, y = 69, label = "= CASSDTAYRQETQYF", hjust = 0, size = 6)
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/1e1b.png", width = 2000, height = 1600, units = "px")
+
 
                                           
 ### Sub-figure 2
@@ -457,7 +451,7 @@ FetchData(cd8_all, c("umap_1", "umap_2", "extra2")) %>% ggplot() +
                                                                            values = c("darkgreen", "aquamarine3", "lightgoldenrod3")) +
                                                         guides(color = guide_legend(nrow = 3, override.aes = list(size = 5), title.position = "top", keywidth = 0.01))
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/1e2a.png", width = 1000, height = 1000, units = "px")
+
 
 meta <- FetchData(cd8_all, c("umap_1", "umap_2", "extra2", "clusters2")) %>% group_by(extra2) %>% mutate(total = n()) %>% 
                                                                              group_by(extra2, clusters2) %>% summarise(count = n(),
@@ -500,7 +494,7 @@ meta %>% ggplot(aes(x = new_x, y = pct, color = extra2)) +
          annotate("text", x = 1, y = 76, label = "bold(alpha[2])", parse = TRUE, hjust = 0, size = 6) + annotate("text", x = 1.3, y = 76, label = "= CAVEVYGGATNKLIF", hjust = 0, size = 6) +
          annotate("text", x = 1, y = 69, label = "bold(beta[1])", parse = TRUE, hjust = 0, size = 6) + annotate("text", x = 1.3, y = 69, label = "= CASSGQASYEQYV", hjust = 0, size = 6)
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/1e2b.png", width = 2000, height = 1600, units = "px")
+
 
 
 ### Sub-figure 3
@@ -515,7 +509,7 @@ FetchData(cd8_all, c("umap_1", "umap_2", "extra3")) %>% ggplot() +
                                                                            values = c("darkgreen", "aquamarine3", "lightgoldenrod3")) +
                                                         guides(color = guide_legend(nrow = 3, override.aes = list(size = 5), title.position = "top", keywidth = 0.01))
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/1e3a.png", width = 1000, height = 1000, units = "px")
+
 
 
 meta <- FetchData(cd8_all, c("umap_1", "umap_2", "extra3", "clusters2")) %>% group_by(extra3) %>% mutate(total = n()) %>% 
@@ -558,7 +552,7 @@ meta %>% ggplot(aes(x = new_x, y = pct, color = extra3)) +
          annotate("text", x = 1, y = 76, label = "bold(alpha[2])", parse = TRUE, hjust = 0, size = 6) + annotate("text", x = 1.3, y = 76, label = "= CVVFRHGQNFVF", hjust = 0, size = 6) +
          annotate("text", x = 1, y = 69, label = "bold(beta[1])", parse = TRUE, hjust = 0, size = 6) + annotate("text", x = 1.3, y = 69, label = "= CSARGGQGIRQETQYF", hjust = 0, size = 6)
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/1e3b.png", width = 2000, height = 1600, units = "px")
+
           
 
 ```
