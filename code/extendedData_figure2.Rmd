@@ -104,7 +104,6 @@ slim %>% ggplot(aes(x = class, y = md_count)) +
                axis.title.x = element_text(vjust = -1), plot.margin = unit(c(1, 0, 3, 0), "lines")) +
          labs(fill = "") + scale_fill_npg()
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/s2a.png", width = 3000, height = 2500, units = "px")
 
 ```
 
@@ -139,7 +138,6 @@ slim %>% ggplot(aes(x = class, y = md_feat)) +
                axis.title.x = element_text(vjust = -1), plot.margin = unit(c(1, 0, 3, 0), "lines")) +
          labs(fill = "") + scale_fill_npg()
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/s2b.png", width = 3000, height = 2500, units = "px")
 ```
 
 ```{r}
@@ -183,7 +181,6 @@ df2  %>% ggplot(aes(x = specialClone, y = md_count)) +
                axis.title.x = element_text(vjust = -1), plot.margin = unit(c(1, 0, 3, 0), "lines")) +
          labs(fill = "") + scale_fill_atlassian()
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/s2e.png", width = 2500, height = 2500, units = "px")
 ```
 
 ```{r}
@@ -214,7 +211,6 @@ df2  %>% ggplot(aes(x = specialClone, y = md_feat)) +
                axis.title.x = element_text(vjust = -1), plot.margin = unit(c(1, 0, 3, 0), "lines")) +
          labs(fill = "") + scale_fill_atlassian()
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/s2f.png", width = 2500, height = 2500, units = "px")
 ```
 
 ```{r}
@@ -231,7 +227,7 @@ table(sce$scDblFinder.class)
 
 meta <- as.data.frame(sce@colData@listData)
 meta <- meta[, c(1, 34:38)]
-write.csv(meta, "/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/scDblFinder_output_realigned.csv", row.names = FALSE)
+write.csv(meta, "/home/dir/scDblFinder_output_realigned.csv", row.names = FALSE)
 ```
 
 
@@ -241,7 +237,7 @@ write.csv(meta, "/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/scDblFinder_o
 ###                             Figure S2C                               ###
 ############################################################################
 
-meta <- read.csv("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/scDblFinder_output_realigned.csv")
+meta <- read.csv("/home/dir/scDblFinder_output_realigned.csv")
 
 cd8s@meta.data <- cd8s@meta.data %>% left_join(meta, by = "Cell_barcode")
 cd8s@meta.data <- as.data.frame(cd8s@meta.data)
@@ -281,7 +277,6 @@ db   %>% ggplot(aes(x = specialClone, y = md_score)) +
                axis.title.x = element_text(vjust = -1), plot.margin = unit(c(1, 0, 3, 0), "lines")) +
          labs(fill = "") + scale_fill_atlassian()
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/s2c.png", width = 3000, height = 2500, units = "px")
 ```
 
 ```{r}
@@ -325,7 +320,6 @@ db5  %>% ggplot(aes(x = doubletStatus, y = md_score)) +
                axis.title.x = element_text(vjust = -1), plot.margin = unit(c(1, 0, 3, 0), "lines"), axis.text.x = element_blank(), axis.ticks.x = element_blank()) +
          labs(fill = "") + scale_fill_cosmic("hallmarks_light")
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/s2d.png", width = 3000, height = 2500, units = "px")
 ```
 
 
@@ -407,5 +401,4 @@ snp2 %>% ggplot(aes(x = locus, y = pct, fill = type)) +
          theme(axis.text = element_text(size = 14, face = "bold"), axis.title = element_text(size = 20, face = "bold"), 
                legend.title = element_text(size = 14, face = "bold"), legend.text = element_text(size = 14, face = "bold"))
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/s2g.png", width = 1200, height = 2400, units = "px")
 ```
