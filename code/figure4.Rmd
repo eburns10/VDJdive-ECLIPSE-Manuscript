@@ -17,8 +17,8 @@ library(rstatix)
 library(readxl)
 library(ggpubr)
 
-source("/home/ecb86/Desktop/R_tools/ECLIPSE.R")
-source("/home/ecb86/Desktop/R_tools/VDJdive_ECLIPSE_paperFunctions.R")
+source("/home/Desktop/R_tools/ECLIPSE.R")
+source("/home/Desktop/R_tools/VDJdive_ECLIPSE_paperFunctions.R")
 set.seed(16)
 ```
 
@@ -27,7 +27,7 @@ set.seed(16)
 ###                         Pre-Processing                               ###
 ############################################################################
 
-braun <- readRDS("/home/ecb86/Desktop/braun/rotation/Braun_cancer_cell/scRCC_SeuratObject.rds")
+braun <- readRDS("/home/Desktop/braun/rotation/Braun_cancer_cell/scRCC_SeuratObject.rds")
 
 braun@meta.data <- braun@meta.data %>% separate(Sample, into = c("donor", "tissue"), remove = FALSE, sep = "_")
 braun@meta.data <- braun@meta.data %>% mutate(tissue = case_when(
@@ -37,11 +37,11 @@ braun@meta.data <- braun@meta.data %>% mutate(tissue = case_when(
 
 cd8 <- subset(braun, subset = ClusterName_TCells %in% c("Treg", "Activated CD4.1", "Activated CD4.2", "CD4 TCM.1", "CD4 TCM.2", "Mito-high T cells", "-1"), invert = TRUE)
 
-dirs <- list.files("/gpfs/gibbs/pi/braun/ecb86/braun_cancerCell/realignment", recursive = TRUE, pattern = "all_contig_annotations\\.csv$", full.names = TRUE)
+dirs <- list.files("/gpfs/gibbs/pi/braun/braun_cancerCell/realignment", recursive = TRUE, pattern = "all_contig_annotations\\.csv$", full.names = TRUE)
 dirs <- dirs[!str_detect(dirs, "SC_VDJ_ASSEMBLER_CS")]
 dirs <- str_replace(dirs, "all.*$", "")
 
-matching <- read.csv("/home/ecb86/project/david/sc_datasets/braun_cancer_cell/braun_matching2.csv")
+matching <- read.csv("/home/project/david/sc_datasets/braun_cancer_cell/braun_matching2.csv")
 matching <- matching %>% filter(Sample != "")
 
 cd8@meta.data <- cd8@meta.data %>% left_join(matching[, 2:3], by = "Sample")
@@ -56,7 +56,7 @@ cd8$ClusterName_TCells[cd8$ClusterName_TCells == "PMCH+ terminally Exhausted CD8
 cd8$ClusterName_TCells[cd8$ClusterName_TCells == "Terminally exhausted CD8.2"] <- "Terminally \n exhausted CD8.2"
 cd8$ClusterName_TCells[cd8$ClusterName_TCells == "Terminally exhausted CD8.3"] <- "Terminally \n exhausted CD8.3"
 
-cd8s <- ECLIPSE(folders = dirs, file_type = "all", seurat_object = cd8, batch = "index", donor = "donor", group = "donor", original_barcode = "Cell_Barcode", write_folder = "/home/ecb86/Desktop/braun/ECLIPSE/braun_cCell/tcr_temp", mode = "standard")
+cd8s <- ECLIPSE(folders = dirs, file_type = "all", seurat_object = cd8, batch = "index", donor = "donor", group = "donor", original_barcode = "Cell_Barcode", write_folder = "/home/Desktop/braun/ECLIPSE/braun_cCell/tcr_temp", mode = "standard")
 
 cd8s <- tcrDoubletDetect(cd8s)
 ```
@@ -104,7 +104,7 @@ contigs3 <- contigs3 %>% select(-pos, -key)
 
 
 ### Taking the new contigs (reduced by 500) and running them through the second half ECLIPSE pipeline
-pst <- post(folders = dirs, all = contigs3, seurat_object = obj, batch = "index", donor = "donor", group = "tissue", original_barcode = "Cell_Barcode", write_folder = "/home/ecb86/Desktop/braun/tcrEclipse/braun_cCell/tcr_temp", mode = "standard")
+pst <- post(folders = dirs, all = contigs3, seurat_object = obj, batch = "index", donor = "donor", group = "tissue", original_barcode = "Cell_Barcode", write_folder = "/home/Desktop/braun/tcrEclipse/braun_cCell/tcr_temp", mode = "standard")
 
 ### Extracting the new clone call and whether it was called by VDJdive or not. Then joining to the regular seurat object for comparison with/without the 500 contigs.
 pst2 <- pst %>% select(Cell_barcode, "new_CTaa" = CTaa, "new_scrCTaa" = scR_CTaa, "newCloneCall" = cloneCallSource)
@@ -140,7 +140,6 @@ join2 %>% ggplot() + geom_col(aes(x = altered, y = pct, fill = steady)) + theme_
                                        labels = c("Incorrect\nPrediction", "No\nPrediction", "Same\nPrediction"))
 
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/4a.png", width = 1200, height = 2000, units = "px")
 ```
 
 ```{r}
@@ -223,7 +222,6 @@ join2_add %>% ggplot() + geom_col(aes(x = altered, y = pct, fill = steady)) + th
                                        limits = c("New Call", "Call Now\nAmbiguous", "Same Call"),
                                        labels = c("Incorrect\nPrediction", "No\nPrediction", "Same\nPrediction"))
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/4b.png", width = 1200, height = 2000, units = "px")
 
 ```
 
@@ -255,7 +253,6 @@ plot3c %>% ggplot(aes(x = class, y = Pct)) +
            ylab("% of Cells") + 
            xlab("Bitypic Chain Set")
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/4c.png", width = 3000, height = 2500, units = "px")
           
 ```
 
@@ -292,7 +289,7 @@ ggplot() + geom_histogram(aes(x = perm_diffs, fill = "Randomly\nPermuted\nClones
                                   annotate("text", x = 0.12, y = -30, label = "<-- Perfect Similarity", fontface = 2, size = 4) +
                                   annotate("text", x = 0.87, y = -30, label = "Perfect Dissimilarity -->", fontface = 2, size = 4)
                                   
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/4d.png", width = 3000, height = 2500, units = "px")                                  
+                                 
 
 ```
 
@@ -325,6 +322,6 @@ ggplot() + geom_histogram(aes(x = perm_diffs2, fill = "Randomly\nPermuted\nClone
                                   annotate("text", x = 0.12, y = -30, label = "<-- Perfect Similarity", fontface = 2, size = 4) +
                                   annotate("text", x = 0.87, y = -30, label = "Perfect Dissimilarity -->", fontface = 2, size = 4)
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/4e.png", width = 3000, height = 2500, units = "px")   
+
 ```
 
