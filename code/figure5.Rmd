@@ -19,15 +19,15 @@ library(ggpubr)
 library(RColorBrewer)
 library(Matrix)
 
-source("/home/ecb86/Desktop/R_tools/ECLIPSE.R")
-source("/home/ecb86/Desktop/R_tools/VDJdive_ECLIPSE_paperFunctions.R")
+source("/home/Desktop/R_tools/ECLIPSE.R")
+source("/home/Desktop/R_tools/VDJdive_ECLIPSE_paperFunctions.R")
 ```
 
 ```{r}
 ############################################################################
 ###                    Figure 5 A-C Pre-Processing                       ###
 ############################################################################
-cd8so <- readRDS("/home/ecb86/project/david/sc_datasets/oliveira_melanoma/cd8/tils.CD8.R0.6.harmonized.20200422.rds")
+cd8so <- readRDS("/home/project/david/sc_datasets/oliveira_melanoma/cd8/tils.CD8.R0.6.harmonized.20200422.rds")
 cd8so <- UpdateSeuratObject(cd8so)
 DimPlot(cd8so, label = TRUE)
 
@@ -35,7 +35,7 @@ cd8so$seurat_barcode <- rownames(cd8so@meta.data)
 # cd8so$patient holds the patient info
 
 
-dirs <- list.dirs("/home/ecb86/project/david/sc_datasets/oliveira_melanoma/TCRdata")
+dirs <- list.dirs("/home/project/david/sc_datasets/oliveira_melanoma/TCRdata")
 dirs <- dirs[-1]
 
 matching <- data.frame("index" = 1:16, "dirs" = str_extract(dirs, "Pt.*$"))
@@ -66,7 +66,7 @@ rownames(cd8so@meta.data) <- cd8so$seurat_barcode
 cd8so$raw_barcode <- str_replace(cd8so$seurat_barcode, "^.*_", "")
 cd8so$raw_barcode <- str_replace(cd8so$raw_barcode, "-.*$", "-1")
 
-ocd8s <- ECLIPSE(folders = dirs, file_type = "all", seurat_object = cd8so, batch = "index", donor = "patient", group = "patient", original_barcode = "raw_barcode", write_folder = "/home/ecb86/Desktop/braun/ECLIPSE/braun_cCell/tcr_temp", mode = "standard")
+ocd8s <- ECLIPSE(folders = dirs, file_type = "all", seurat_object = cd8so, batch = "index", donor = "patient", group = "patient", original_barcode = "raw_barcode", write_folder = "/home/Desktop/braun/ECLIPSE/braun_cCell/tcr_temp", mode = "standard")
 
 ocd8s <- tcrDoubletDetect(ocd8s)
 ```
@@ -103,7 +103,7 @@ div  %>% ggplot(aes(x = class, y = shannon)) +
          scale_x_discrete(limits = c("tcrEclipse", "scRepertoire", "noNaFilterMulti", "noNaNoMulti")) +
          scale_fill_manual(values = c("paleturquoise3", "darkorange2", "darkolivegreen3", "hotpink2"))
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/5a.png", width = 1800, height = 1400, units = "px")
+
 ```
 
 ```{r}
@@ -146,7 +146,7 @@ combo3 %>% ggplot(aes(x = type, y = pct)) +
            scale_x_discrete(limits = c("tcrEclipse", "scRepertoire", "noNaFilterMulti", "noNaNoMulti")) +
            scale_fill_manual(values = c("paleturquoise3", "darkorange2", "darkolivegreen3", "hotpink2"))
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/5b.png", width = 1800, height = 1400, units = "px")
+ggsave("/home/Desktop/braun/ECLIPSE/paper_realigned/figures/5b.png", width = 1800, height = 1400, units = "px")
 ```
 
 ```{r}
@@ -180,14 +180,14 @@ combo4 %>% ggplot(aes(x = type, y = pct)) +
            scale_x_discrete(limits = c("tcrEclipse", "scRepertoire", "noNaFilterMulti", "noNaNoMulti")) +
            scale_fill_manual(values = c("paleturquoise3", "darkorange2", "darkolivegreen3", "hotpink2"))
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/5c.png", width = 1800, height = 1400, units = "px")
+
 ```
 
 ```{r}
 ############################################################################
 ###                    Figure 5D-F Pre-Processing                        ###
 ############################################################################
-cd4s <- readRDS("/home/ecb86/project/david/sc_datasets/oliveira_melanoma/cd4/tils.CD4.harmonized.20200514.rds")
+cd4s <- readRDS("/home/project/david/sc_datasets/oliveira_melanoma/cd4/tils.CD4.harmonized.20200514.rds")
 cd4s <- UpdateSeuratObject(cd4s)
 DimPlot(cd4s, label = TRUE)
 
@@ -195,7 +195,7 @@ cd4s$seurat_barcode <- rownames(cd4s@meta.data)
 # cd8s$patient holds the patient info
 
 
-dirs <- list.dirs("/home/ecb86/project/david/sc_datasets/oliveira_melanoma/TCRdata")
+dirs <- list.dirs("/home/project/david/sc_datasets/oliveira_melanoma/TCRdata")
 dirs <- dirs[-1]
 
 matching <- data.frame("index" = 1:16, "dirs" = str_extract(dirs, "Pt.*$"))
@@ -226,7 +226,7 @@ rownames(cd4s@meta.data) <- cd4s$seurat_barcode
 cd4s$raw_barcode <- str_replace(cd4s$seurat_barcode, "^.*_", "")
 cd4s$raw_barcode <- str_replace(cd4s$raw_barcode, "-.*$", "-1")
 
-ocd4s <- ECLIPSE(folders = dirs, file_type = "all", seurat_object = cd4s, batch = "index", donor = "patient", group = "patient", original_barcode = "raw_barcode", write_folder = "/home/ecb86/Desktop/braun/ECLIPSE/braun_cCell/tcr_temp", mode = "standard")
+ocd4s <- ECLIPSE(folders = dirs, file_type = "all", seurat_object = cd4s, batch = "index", donor = "patient", group = "patient", original_barcode = "raw_barcode", write_folder = "/home/Desktop/braun/ECLIPSE/braun_cCell/tcr_temp", mode = "standard")
 
 ocd4s <- tcrDoubletDetect(ocd4s)
 ```
@@ -264,7 +264,7 @@ div  %>% ggplot(aes(x = class, y = shannon)) +
          scale_x_discrete(limits = c("tcrEclipse", "scRepertoire", "noNaFilterMulti", "noNaNoMulti")) +
          scale_fill_manual(values = c("paleturquoise3", "darkorange2", "darkolivegreen3", "hotpink2"))
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/5d.png", width = 1800, height = 1400, units = "px")
+
 ```
 
 ```{r}
@@ -306,7 +306,7 @@ combo3 %>% ggplot(aes(x = type, y = pct)) +
            scale_x_discrete(limits = c("tcrEclipse", "scRepertoire", "noNaFilterMulti", "noNaNoMulti")) +
            scale_fill_manual(values = c("paleturquoise3", "darkorange2", "darkolivegreen3", "hotpink2"))
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/5e.png", width = 1800, height = 1400, units = "px")
+
 ```
 
 ```{r}
@@ -340,7 +340,7 @@ combo4 %>% ggplot(aes(x = type, y = pct)) +
            scale_x_discrete(limits = c("tcrEclipse", "scRepertoire", "noNaFilterMulti", "noNaNoMulti")) +
            scale_fill_manual(values = c("paleturquoise3", "darkorange2", "darkolivegreen3", "hotpink2"))
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/5f.png", width = 1800, height = 1400, units = "px")
+
 ```
 
 ```{r}
@@ -348,7 +348,7 @@ ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/5f.png", width
 ###                    Figure 5 G-I Pre-Processing.                      ###
 ############################################################################
 
-dirs <- list.files("/home/ecb86/project/david/sc_datasets/th17_covid", full.names = TRUE)
+dirs <- list.files("/home/project/david/sc_datasets/th17_covid", full.names = TRUE)
 samples <- str_extract(dirs, "Bac.*|Sar.*")
 
 ps <- list()
@@ -419,9 +419,9 @@ DimPlot(tumor, label = TRUE)
 
 tumor <- JoinLayers(tumor)
 
-th17 <- ECLIPSE(file = "manual", file_paths = tcr_dirs, seurat_object = tumor, batch = "index", donor = "donor", group = "donor", original_barcode = "original_barcode", write_folder = "/home/ecb86/Desktop/braun/tcrEclipse/th17_covid", mode = "standard", format = "none")
+th17 <- ECLIPSE(file = "manual", file_paths = tcr_dirs, seurat_object = tumor, batch = "index", donor = "donor", group = "donor", original_barcode = "original_barcode", write_folder = "/home/Desktop/braun/tcrEclipse/th17_covid", mode = "standard", format = "none")
 
-#th17 <- readRDS("/home/ecb86/project/david/tcrEclipse/paper_seurat_objects/th17_covid.rds")
+#th17 <- readRDS("/home/project/david/tcrEclipse/paper_seurat_objects/th17_covid.rds")
 
 DimPlot(th17, group.by = "cloneCallSource")
 DimPlot(th17, label = TRUE)
@@ -496,7 +496,6 @@ div  %>% ggplot(aes(x = class, y = shannon)) +
          scale_fill_manual(values = c("paleturquoise3", "darkorange2", "darkolivegreen3", "hotpink2"))
 
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/5g.png", width = 1800, height = 1400, units = "px")
 ```
 
 
@@ -546,7 +545,7 @@ combo3 %>% ggplot(aes(x = type, y = pct)) +
            scale_x_discrete(limits = c("tcrEclipse", "scRepertoire", "noNaFilterMulti", "noNaNoMulti")) +
            scale_fill_manual(values = c("paleturquoise3", "darkorange2", "darkolivegreen3", "hotpink2"))
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/5h.png", width = 1800, height = 1400, units = "px")
+ggsave("/home/Desktop/braun/ECLIPSE/paper_realigned/figures/5h.png", width = 1800, height = 1400, units = "px")
 ```
 
 
@@ -589,5 +588,5 @@ combo4 %>% ggplot(aes(x = type, y = pct)) +
            scale_x_discrete(limits = c("tcrEclipse", "scRepertoire", "noNaFilterMulti", "noNaNoMulti")) +
            scale_fill_manual(values = c("paleturquoise3", "darkorange2", "darkolivegreen3", "hotpink2"))
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/5i.png", width = 1800, height = 1400, units = "px")
+ggsave("/home/Desktop/braun/ECLIPSE/paper_realigned/figures/5i.png", width = 1800, height = 1400, units = "px")
 ```
