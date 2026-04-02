@@ -1,0 +1,565 @@
+---
+title: "figure1"
+output: html_document
+date: "2025-09-10"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(Seurat)
+library(scRepertoire)
+library(VDJdive)
+library(rstatix)
+library(readxl)
+library(ggpubr)
+library(ggsci)
+
+source("/home/ecb86/Desktop/R_tools/ECLIPSE.R")
+source("/home/ecb86/Desktop/R_tools/VDJdive_ECLIPSE_paperFunctions.R")
+```
+
+
+```{r}
+############################################################################
+###                         Pre-Processing                               ###
+############################################################################
+braun <- readRDS("/home/ecb86/Desktop/braun/rotation/Braun_cancer_cell/scRCC_SeuratObject.rds")
+
+braun@meta.data <- braun@meta.data %>% separate(Sample, into = c("donor", "tissue"), remove = FALSE, sep = "_")
+braun@meta.data <- braun@meta.data %>% mutate(tissue = case_when(
+                                                                 tissue %in% c("T", "T2") ~ "Tumor",
+                                                                 tissue == "N" ~ "Normal",
+                                                                 tissue %in% c("M", "V")  ~ "Other"))
+
+cd8 <- subset(braun, subset = ClusterName_TCells %in% c("Treg", "Activated CD4.1", "Activated CD4.2", "CD4 TCM.1", "CD4 TCM.2", "Mito-high T cells", "-1"), invert = TRUE)
+
+dirs <- list.files("/gpfs/gibbs/pi/braun/ecb86/braun_cancerCell/realignment", recursive = TRUE, pattern = "all_contig_annotations\\.csv$", full.names = TRUE)
+dirs <- dirs[!str_detect(dirs, "SC_VDJ_ASSEMBLER_CS")]
+dirs <- str_replace(dirs, "all.*$", "")
+
+matching <- read.csv("/home/ecb86/project/david/sc_datasets/braun_cancer_cell/braun_matching2.csv")
+matching <- matching %>% filter(Sample != "")
+
+cd8@meta.data <- cd8@meta.data %>% left_join(matching[, 2:3], by = "Sample")
+cd8@meta.data <- as.data.frame(cd8@meta.data)
+rownames(cd8@meta.data) <- cd8$Cell_barcode
+cd8$Cell_Barcode <- str_replace(cd8$Cell_barcode, "\\-.*$", "-1")
+
+ElbowPlot(cd8, ndims = 50)
+cd8 <- RunUMAP(cd8, dims = 1:30)
+
+cd8$ClusterName_TCells[cd8$ClusterName_TCells == "PMCH+ terminally Exhausted CD8.1"] <- "PMCH+ terminally \n Exhausted CD8.1"
+cd8$ClusterName_TCells[cd8$ClusterName_TCells == "Terminally exhausted CD8.2"] <- "Terminally \n exhausted CD8.2"
+cd8$ClusterName_TCells[cd8$ClusterName_TCells == "Terminally exhausted CD8.3"] <- "Terminally \n exhausted CD8.3"
+```
+
+
+```{r}
+############################################################################
+###                             Figure 1A                                ###
+############################################################################
+cd8@meta.data <- cd8@meta.data %>% mutate(clusters2 = case_when(
+                                                                str_detect(ClusterName_TCells, "CD8 TRM") ~ "TRM",
+                                                                str_detect(ClusterName_TCells, "^Exhausted") ~ "Exhausted",
+                                                                str_detect(ClusterName_TCells, "Cytotoxic") ~ "Cytotoxic",
+                                                                str_detect(ClusterName_TCells, "erminally") ~ "Terminally\nExhausted",
+                                                                str_detect(ClusterName_TCells, "Proliferating") ~ "Proliferating"))
+                                                                
+
+
+### 700x700
+DimPlot(cd8, group.by = "clusters2", pt.size = 1) + 
+        theme_void() + ggtitle("") + theme(legend.position = "bottom", legend.text = element_text(face = "bold", size = 10)) +
+        guides(color = guide_legend(nrow = 2, override.aes = list(size = 5), keywidth = 0.01)) +
+        scale_color_npg()
+ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/1a.png", width = 1400, height = 1400, units = "px")
+
+```
+
+```{r}
+############################################################################
+###                             Figure 1B                                ###
+############################################################################
+
+cd8_all <- scRep(cd8, folders = dirs, file = "all", batch = "index", group = "tissue", original_barcode = "Cell_Barcode", keepConfidentContigs = TRUE)
+
+cd8_all@meta.data <- cd8_all@meta.data %>% mutate(chain_count = case_when(
+                                                                           is.na(CTaa) ~ 0,
+                                                                          !is.na(CTaa) ~ 2 + str_count(CTaa, ";") - str_detect(CTaa, "^NA_|_NA$")))
+
+cd8_all@meta.data <- cd8_all@meta.data %>% mutate(chain_count2 = case_when(
+                                                                           chain_count > 3 ~ "4+",
+                                                                           chain_count <= 3 ~ as.factor(chain_count)))
+
+
+
+FetchData(cd8_all, c("umap_1", "umap_2", "chain_count2")) %>% ggplot() + 
+                                                              geom_point(aes(x = umap_1, y = umap_2, color = chain_count2), size = 1, alpha = 1) +
+                                                              theme_void() + ggtitle("") + labs(color = "TCR Chain Count") +
+                                                              theme(legend.position = "bottom", legend.text = element_text(face = "bold", size = 10), legend.title = element_text(size = 16, face = "bold", hjust = 0.5),
+                                                                    legend.title.position = "top") +
+                                                              scale_color_manual(values = c("grey80", "limegreen", "skyblue3", "orange", "darkred"), limits = c("0", "1", "2", "3", "4+")) +
+                                                              guides(color = guide_legend(nrow = 1, override.aes = list(size = 8), keywidth = 0.01))
+ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/1b1.png", width = 1400, height = 1400, units = "px")
+
+
+chains <- FetchData(cd8_all, c("umap_1", "umap_2", "chain_count2")) %>% mutate(size = nrow(cd8@meta.data)) %>%
+          group_by(chain_count2) %>% summarise(pct = 100 * n() / first(size))
+
+chains$chain_count2 <- factor(chains$chain_count2, levels = c("4+", "3", "2", "1", "0"))
+
+
+chains %>% ggplot() + 
+           geom_col(aes(x = 1, y = pct, fill = chain_count2), color = "black") + coord_flip() + ggtitle("% of Cells") +
+           theme_classic() + xlab("") + ylab("") + scale_x_continuous(expand = c(0, 0)) + 
+           scale_y_continuous(breaks = seq(0, 100, 10), labels = c("0", "", "20", "", "40", "", "60", "", "80", "", "100"), expand = c(0, 0), limits = c(-0.2, 100.2)) + 
+           scale_fill_manual(values = c("grey80", "limegreen", "skyblue3", "orange", "darkred"), limits = c("0", "1", "2", "3", "4+")) +
+           theme(axis.ticks.y = element_blank(), axis.text.y = element_blank(), axis.text.x = element_text(size = 14, face = "bold"), axis.title.x = element_text(size = 16, face = "bold"),  
+                 legend.text = element_text(face = "bold", size = 8), legend.position = "none", panel.border = element_rect(color = "black", fill = NA, linewidth = 1.5),
+                 axis.line = element_blank(), plot.margin = unit(c(0.5, 0.8, 0.5, 0.5), "cm"), plot.title = element_text(size = 16, face = "bold", hjust = 0.5))
+
+ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/1b2.png", width = 1400, height = 420, units = "px")
+
+```
+
+```{r}
+############################################################################
+###                             Figure 1C                                ###
+############################################################################
+
+cd8_all@meta.data <- cd8_all@meta.data %>% mutate(missing = case_when(
+                                                                       str_detect(CTaa, "^NA_|_NA$") ~ "Missing\nOne Chain",
+                                                                      !str_detect(CTaa, "^NA_|_NA$") ~ "Both Chains\nDetected",
+                                                                      is.na(CTaa) ~ "Missing\nBoth Chains"),
+                                                  extra = case_when(
+                                                                       str_detect(CTaa, ";") ~ "Extra Chains",
+                                                                      !str_detect(CTaa, ";") ~ "<=1 for\nBoth Chains",
+                                                                      is.na(CTaa) ~ "No TCR\nDetected"),
+                                                  regular = case_when(
+                                                                       !str_detect(CTaa, "^NA_|_NA$") & !str_detect(CTaa, ";") ~ "Regular Chains", 
+                                                                       str_detect(CTaa, "^NA_|_NA$") & str_detect(CTaa, ";") ~ "Missing Chain\n& Extra of\nOther Chain",
+                                                                       str_detect(CTaa, "^NA_|_NA$") & !str_detect(CTaa, ";") ~ "Missing Chain",
+                                                                       !str_detect(CTaa, "^NA_|_NA$") & str_detect(CTaa, ";") ~ "Extra Chain",
+                                                                       is.na(CTaa) ~ "No TCR\nDetected"))
+
+df <- cd8_all@meta.data %>% group_by(donor) %>% mutate(donorCount = n()) %>%
+                            group_by(donor, regular) %>% summarise(pct = 100 * n() / first(donorCount),
+                                                                   donorCount = first(donorCount),
+                                                                   count = n())
+
+df <- df %>% group_by(donor) %>% mutate(regularSize = pct[which(regular == "Regular Chains")]) %>% ungroup()
+
+df$regular <- factor(df$regular, levels = c("No TCR\nDetected", "Missing Chain\n& Extra of\nOther Chain", "Missing Chain", "Extra Chain", "Regular Chains"))
+
+df %>% ggplot() + geom_col(aes(x = reorder(donor, regularSize), y = pct, fill = regular)) + labs(fill = "") + xlab("Patient") + ylab("% of Cells") +
+                  theme_classic() + theme(axis.title = element_text(size = 16, face = "bold"), axis.text = element_text(size = 12, face = "bold"), 
+                                          legend.position = "bottom", axis.text.x = element_blank(), axis.ticks.x = element_blank(),
+                                          legend.text = element_text(face = "bold"), axis.title.x = element_text(vjust = -0.5),
+                                          plot.margin = unit(c(0.1, 0.7, 0.1, 0.1), "cm")) +
+                  scale_y_continuous(expand = c(0.01, 0.01), breaks = seq(0, 100, 10), labels = c("0", "", "20", "", "40", "", "60", "", "80", "", "100")) + 
+                  scale_fill_manual(values = c("grey80", "purple3", "limegreen","orange", "skyblue3"),
+                                    breaks = c("No TCR\nDetected", "Missing Chain\n& Extra of\nOther Chain", "Missing Chain", "Extra Chain", "Regular Chains"),
+                                    labels = c("No TCR\nDetected", "Missing Chain\n& Extra of\nOther Chain", "Missing Chain", "Extra Chain", "1 TCRα &\n1 TCRβ")) +
+                  guides(fill = guide_legend(nrow = 1))
+
+
+ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/1c.png", width = 2000, height = 1600, units = "px")
+
+
+### Calculating percentages for text
+median(df$pct[df$regular == "Regular Chains"])
+max(df$pct[df$regular == "Regular Chains"])
+min(df$pct[df$regular == "Regular Chains"])
+
+df2 <- df %>% filter(!regular %in% c("No TCR\nDetected", "Regular Chains")) %>%
+              group_by(donor) %>% summarise(newPct = sum(pct))
+
+median(df2$newPct)
+max(df2$newPct)
+min(df2$newPct)
+
+```
+
+
+```{r}
+############################################################################
+###                          Figure 1D                                   ###
+############################################################################
+
+cd8_all@meta.data <- cd8_all@meta.data %>% mutate(extra1 = case_when(
+                                                                     CTaa %in% c("CRDRVMVAGGYNKLIF;CAVRDVDSGAGSYQLTF_CASSDTAYRQETQYF", "CAVRDVDSGAGSYQLTF_CASSDTAYRQETQYF", "CRDRVMVAGGYNKLIF_CASSDTAYRQETQYF") ~ CTaa,
+                                                                     !CTaa %in% c("CRDRVMVAGGYNKLIF;CAVRDVDSGAGSYQLTF_CASSDTAYRQETQYF", "CAVRDVDSGAGSYQLTF_CASSDTAYRQETQYF", "CRDRVMVAGGYNKLIF_CASSDTAYRQETQYF") ~ "Other"),
+                                                  extra2 = case_when(
+                                                                      CTaa %in% c("CAVRDYGGATNKLIF;CAVEVYGGATNKLIF_CASSGQASYEQYV", "CAVEVYGGATNKLIF_CASSGQASYEQYV", "CAVRDYGGATNKLIF_CASSGQASYEQYV") ~ CTaa,
+                                                                     !CTaa %in% c("CAVRDYGGATNKLIF;CAVEVYGGATNKLIF_CASSGQASYEQYV", "CAVEVYGGATNKLIF_CASSGQASYEQYV", "CAVRDYGGATNKLIF_CASSGQASYEQYV") ~ "Other"),
+                                                  extra3 = case_when(
+                                                                      CTaa %in% c("CALGPYGNNRLAF;CVVFRHGQNFVF_CSARGGQGIRQETQYF", "CVVFRHGQNFVF_CSARGGQGIRQETQYF", "CALGPYGNNRLAF_CSARGGQGIRQETQYF") ~ CTaa,
+                                                                     !CTaa %in% c("CALGPYGNNRLAF;CVVFRHGQNFVF_CSARGGQGIRQETQYF", "CVVFRHGQNFVF_CSARGGQGIRQETQYF", "CALGPYGNNRLAF_CSARGGQGIRQETQYF") ~ "Other"),
+                                                  missing1 = case_when(
+                                                                        CTaa %in% c("CIVRVYNTDKLIF_CASSMGTAYEQYF", "NA_CASSMGTAYEQYF", "CIVRVYNTDKLIF_NA") ~ CTaa,
+                                                                       !CTaa %in% c("CIVRVYNTDKLIF_CASSMGTAYEQYF", "NA_CASSMGTAYEQYF", "CIVRVYNTDKLIF_NA") ~ "Other"),
+                                                  missing2 = case_when(
+                                                                        CTaa %in% c("CALSHYGGATNKLIF_CASSLAFGARQLTFF", "NA_CASSLAFGARQLTFF", "CALSHYGGATNKLIF_NA") ~ CTaa,
+                                                                       !CTaa %in% c("CALSHYGGATNKLIF_CASSLAFGARQLTFF", "NA_CASSLAFGARQLTFF", "CALSHYGGATNKLIF_NA") ~ "Other"),
+                                                  missing3 = case_when(
+                                                                        CTaa %in% c("CAVRGRNSGAGSYQLTF_CASSQGGQFNQPQHF", "NA_CASSQGGQFNQPQHF", "CAVRGRNSGAGSYQLTF_NA") ~ CTaa,
+                                                                       !CTaa %in% c("CAVRGRNSGAGSYQLTF_CASSQGGQFNQPQHF", "NA_CASSQGGQFNQPQHF", "CAVRGRNSGAGSYQLTF_NA") ~ "Other"))
+
+### All 350x350 for UMAP, 650x400 for lollipop plot
+
+### Sub Figure 1
+FetchData(cd8_all, c("umap_1", "umap_2", "missing1")) %>% ggplot() + 
+                                                          geom_point(data = . %>% filter(missing1 == "Other"), aes(x = umap_1, y = umap_2), color = "grey80", size = 0.1, alpha = 0.2) +
+                                                          geom_point(data = . %>% filter(missing1 != "Other"), aes(x = umap_1, y = umap_2, color = missing1), size = 0.1, alpha = 1) + 
+                                                          theme_void() + labs(title = "Clone 1", color = "") +
+                                                          theme(legend.position = "bottom", legend.text = element_text(face = "bold", size = 14), legend.title = element_blank(), 
+                                                                plot.title = element_text(size = 20, face = "bold", hjust = 0.5), legend.key.spacing.y = unit(0.01, "cm")) +
+                                                          scale_color_manual(breaks = c("CIVRVYNTDKLIF_CASSMGTAYEQYF", "NA_CASSMGTAYEQYF", "CIVRVYNTDKLIF_NA"), 
+                                                                             labels =  c("α1 --- β1", "? --- β1", "α1 --- ?"), 
+                                                                             values = c("lightpink3", "orange4", "skyblue4")) +
+                                                          guides(color = guide_legend(nrow = 3, override.aes = list(size = 5), title.position = "top", keywidth = 0.01))
+
+
+
+ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/1d1a.png", width = 1000, height = 1000, units = "px")
+
+meta <- FetchData(cd8_all, c("umap_1", "umap_2", "missing1", "clusters2")) %>% group_by(missing1) %>% mutate(total = n()) %>% 
+                                                                               group_by(missing1, clusters2) %>% summarise(count = n(),
+                                                                                                                           pct = 100 * n() / first(total))
+meta <- meta %>% ungroup() %>% complete(missing1, clusters2) %>% filter(missing1 != "Other")
+meta[is.na(meta)] <- 0
+
+meta <- meta %>% mutate(new_x = case_when(
+                                          clusters2 == "Proliferating" & missing1 == "CIVRVYNTDKLIF_CASSMGTAYEQYF" ~ 0.8,
+                                          clusters2 == "Proliferating" & missing1 == "CIVRVYNTDKLIF_NA" ~ 1,
+                                          clusters2 == "Proliferating" & missing1 == "NA_CASSMGTAYEQYF" ~ 1.2,
+                                          clusters2 == "Cytotoxic" & missing1 == "CIVRVYNTDKLIF_CASSMGTAYEQYF" ~ 1.8,
+                                          clusters2 == "Cytotoxic" & missing1 == "CIVRVYNTDKLIF_NA" ~ 2,
+                                          clusters2 == "Cytotoxic" & missing1 == "NA_CASSMGTAYEQYF" ~ 2.2,
+                                          clusters2 == "TRM" & missing1 == "CIVRVYNTDKLIF_CASSMGTAYEQYF" ~ 2.8,
+                                          clusters2 == "TRM" & missing1 == "CIVRVYNTDKLIF_NA" ~ 3,
+                                          clusters2 == "TRM" & missing1 == "NA_CASSMGTAYEQYF" ~ 3.2,
+                                          clusters2 == "Exhausted" & missing1 == "CIVRVYNTDKLIF_CASSMGTAYEQYF" ~ 3.8,
+                                          clusters2 == "Exhausted" & missing1 == "CIVRVYNTDKLIF_NA" ~ 4,
+                                          clusters2 == "Exhausted" & missing1 == "NA_CASSMGTAYEQYF" ~ 4.2,
+                                          clusters2 == "Terminally\nExhausted" & missing1 == "CIVRVYNTDKLIF_CASSMGTAYEQYF" ~ 4.8,
+                                          clusters2 == "Terminally\nExhausted" & missing1 == "CIVRVYNTDKLIF_NA" ~ 5,
+                                          clusters2 == "Terminally\nExhausted" & missing1 == "NA_CASSMGTAYEQYF" ~ 5.2))
+
+meta %>% ggplot(aes(x = new_x, y = pct, color = missing1)) +
+         geom_hline(yintercept = 0, color = "black") + geom_vline(xintercept = 0.405, color = "black") +
+         geom_segment(aes(xend = new_x, yend = 0, group = missing1), color = "grey70", linetype = "dashed", linewidth = 1) +
+         geom_point(aes(color = missing1, group = missing1), size = 5) +
+         theme_classic() + ggtitle("") + labs(color = "") +
+         theme(legend.position = "none", axis.title = element_text(size = 20, face = "bold"), panel.ontop = FALSE,
+               axis.line = element_blank(), axis.text = element_text(size = 12, face = "bold"), axis.text.x = element_text(vjust = 0.5), axis.ticks.length.x  = unit(0, "cm")) + 
+         scale_y_continuous(expand = expansion(mult = c(0, 0.03)), limits = c(0, 100)) + ylab("% of Cells") + xlab("Cell Fate") + coord_cartesian(clip = "off") + 
+         scale_color_manual(breaks = c("CIVRVYNTDKLIF_CASSMGTAYEQYF", "NA_CASSMGTAYEQYF", "CIVRVYNTDKLIF_NA"), 
+                            values = c("lightpink3", "orange4", "skyblue4"),
+                            labels = c("CIVRVYNTDKLIF_CASSMGTAYEQYF", "NA_CASSMGTAYEQYF", "CIVRVYNTDKLIF_NA")) +
+         scale_x_discrete(labels = c("Prolferating", "Cytotoxic", "TRM", "Exhausted", "Terminally\nExhausted"), limits = c("1", "2", "3", "4", "5")) +
+         annotate("text", x = 1, y = 90, label = "CDR3 Key:", hjust = 0, size = 6) + 
+         annotate("text", x = 1, y = 83, label = "bold(alpha[1])", parse = TRUE, hjust = 0, size = 6) + annotate("text", x = 1.25, y = 83, label = "= CIVRVYNTDKLIF", hjust = 0, size = 6) +
+         annotate("text", x = 1, y = 76, label = "bold(beta[1])", parse = TRUE, hjust = 0, size = 6) + annotate("text", x = 1.25, y = 76, label = "= CASSMGTAYEQYF", hjust = 0, size = 6)
+
+ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/1d1b.png", width = 2000, height = 1600, units = "px")
+
+
+### Sub Figure 2
+FetchData(cd8_all, c("umap_1", "umap_2", "missing2")) %>% ggplot() + 
+                                                          geom_point(data = . %>% filter(missing2 == "Other"), aes(x = umap_1, y = umap_2), color = "grey80", size = 0.1, alpha = 0.2) +
+                                                          geom_point(data = . %>% filter(missing2 != "Other"), aes(x = umap_1, y = umap_2, color = missing2), size = 0.1, alpha = 1) + 
+                                                          theme_void() + labs(title = "Clone 2", color = "") +
+                                                          theme(legend.position = "bottom", legend.text = element_text(face = "bold", size = 14), legend.title = element_blank(), 
+                                                                plot.title = element_text(size = 20, face = "bold", hjust = 0.5), legend.key.spacing.y = unit(0.01, "cm")) +
+                                                          scale_color_manual(breaks = c("CALSHYGGATNKLIF_CASSLAFGARQLTFF", "NA_CASSLAFGARQLTFF", "CALSHYGGATNKLIF_NA"), 
+                                                                             labels =  c("α1 --- β1", "? --- β1", "α1 --- ?"), 
+                                                                             values = c("lightpink3", "orange4", "skyblue4")) +
+                                                          guides(color = guide_legend(nrow = 3, override.aes = list(size = 5), title.position = "top", keywidth = 0.01))
+
+ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/1d2a.png", width = 1000, height = 1000, units = "px")
+
+meta <- FetchData(cd8_all, c("umap_1", "umap_2", "missing2", "clusters2")) %>% group_by(missing2) %>% mutate(total = n()) %>% 
+                                                                               group_by(missing2, clusters2) %>% summarise(count = n(),
+                                                                                                                           pct = 100 * n() / first(total))
+meta <- meta %>% ungroup() %>% complete(missing2, clusters2) %>% filter(missing2 != "Other")
+meta[is.na(meta)] <- 0
+
+meta <- meta %>% mutate(new_x = case_when(
+                                          clusters2 == "Proliferating" & missing2 == "CALSHYGGATNKLIF_CASSLAFGARQLTFF" ~ 0.8,
+                                          clusters2 == "Proliferating" & missing2 == "CALSHYGGATNKLIF_NA" ~ 1,
+                                          clusters2 == "Proliferating" & missing2 == "NA_CASSLAFGARQLTFF" ~ 1.2,
+                                          clusters2 == "Cytotoxic" & missing2 == "CALSHYGGATNKLIF_CASSLAFGARQLTFF" ~ 1.8,
+                                          clusters2 == "Cytotoxic" & missing2 == "CALSHYGGATNKLIF_NA" ~ 2,
+                                          clusters2 == "Cytotoxic" & missing2 == "NA_CASSLAFGARQLTFF" ~ 2.2,
+                                          clusters2 == "TRM" & missing2 == "CALSHYGGATNKLIF_CASSLAFGARQLTFF" ~ 2.8,
+                                          clusters2 == "TRM" & missing2 == "CALSHYGGATNKLIF_NA" ~ 3,
+                                          clusters2 == "TRM" & missing2 == "NA_CASSLAFGARQLTFF" ~ 3.2,
+                                          clusters2 == "Exhausted" & missing2 == "CALSHYGGATNKLIF_CASSLAFGARQLTFF" ~ 3.8,
+                                          clusters2 == "Exhausted" & missing2 == "CALSHYGGATNKLIF_NA" ~ 4,
+                                          clusters2 == "Exhausted" & missing2 == "NA_CASSLAFGARQLTFF" ~ 4.2,
+                                          clusters2 == "Terminally\nExhausted" & missing2 == "CALSHYGGATNKLIF_CASSLAFGARQLTFF" ~ 4.8,
+                                          clusters2 == "Terminally\nExhausted" & missing2 == "CALSHYGGATNKLIF_NA" ~ 5,
+                                          clusters2 == "Terminally\nExhausted" & missing2 == "NA_CASSLAFGARQLTFF" ~ 5.2))
+
+meta %>% ggplot(aes(x = new_x, y = pct, color = missing2)) +
+         geom_hline(yintercept = 0, color = "black") + geom_vline(xintercept = 0.405, color = "black") +
+         geom_segment(aes(xend = new_x, yend = 0, group = missing2), color = "grey70", linetype = "dashed", linewidth = 1) +
+         geom_point(aes(color = missing2, group = missing2), size = 5) +
+         theme_classic() + ggtitle("") + labs(color = "") +
+         theme(legend.position = "none", axis.title = element_text(size = 20, face = "bold"), panel.ontop = FALSE,
+               axis.line = element_blank(), axis.text = element_text(size = 12, face = "bold"), axis.text.x = element_text(vjust = 0.5), axis.ticks.length.x  = unit(0, "cm")) + 
+         scale_y_continuous(expand = expansion(mult = c(0, 0.03)), limits = c(0, 100)) + ylab("% of Cells") + xlab("Cell Fate") + coord_cartesian(clip = "off") + 
+         scale_color_manual(breaks = c("CALSHYGGATNKLIF_CASSLAFGARQLTFF", "NA_CASSLAFGARQLTFF", "CALSHYGGATNKLIF_NA"), 
+                            values = c("lightpink3", "orange4", "skyblue4"),
+                            labels = c("CALSHYGGATNKLIF_CASSLAFGARQLTFF", "NA_CASSLAFGARQLTFF", "CALSHYGGATNKLIF_NA")) +
+         scale_x_discrete(labels = c("Proliferating", "Cytotoxic", "TRM", "Exhausted", "Terminally\nExhausted"), limits = c("1", "2", "3", "4", "5")) +
+         annotate("text", x = 3, y = 90, label = "CDR3 Key:", hjust = 0, size = 6) + 
+         annotate("text", x = 3, y = 83, label = "bold(alpha[1])", parse = TRUE, hjust = 0, size = 6) + annotate("text", x = 3.25, y = 83, label = "= CALSHYGGATNKLIF", hjust = 0, size = 6) +
+         annotate("text", x = 3, y = 76, label = "bold(beta[1])", parse = TRUE, hjust = 0, size = 6) + annotate("text", x = 3.25, y = 76, label = "= CASSLAFGARQLTFF", hjust = 0, size = 6)
+
+ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/1d2b.png", width = 2000, height = 1600, units = "px")
+
+
+
+### Sub Figure 3
+FetchData(cd8_all, c("umap_1", "umap_2", "missing3")) %>% ggplot() + 
+                                                          geom_point(data = . %>% filter(missing3 == "Other"), aes(x = umap_1, y = umap_2), color = "grey80", size = 0.1, alpha = 0.2) +
+                                                          geom_point(data = . %>% filter(missing3 != "Other"), aes(x = umap_1, y = umap_2, color = missing3), size = 0.1, alpha = 1) + 
+                                                          theme_void() + labs(title = "Clone 3", color = "") +
+                                                          theme(legend.position = "bottom", legend.text = element_text(face = "bold", size = 14), legend.title = element_blank(), 
+                                                                plot.title = element_text(size = 20, face = "bold", hjust = 0.5), legend.key.spacing.y = unit(0.01, "cm")) +
+                                                          scale_color_manual(breaks = c("CAVRGRNSGAGSYQLTF_CASSQGGQFNQPQHF", "NA_CASSQGGQFNQPQHF"), 
+                                                                             labels =  c("α1 --- β1", "? --- β1"), 
+                                                                             values = c("lightpink3", "orange4")) +
+                                                          guides(color = guide_legend(nrow = 3, override.aes = list(size = 5), title.position = "top", keywidth = 0.01))
+
+ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/1d3a.png", width = 1000, height = 1000, units = "px")
+
+meta <- FetchData(cd8_all, c("umap_1", "umap_2", "missing3", "clusters2")) %>% group_by(missing3) %>% mutate(total = n()) %>% 
+                                                                               group_by(missing3, clusters2) %>% summarise(count = n(),
+                                                                                                                         pct = 100 * n() / first(total))
+meta <- meta %>% ungroup() %>% complete(missing3, clusters2) %>% filter(missing3 != "Other")
+meta[is.na(meta)] <- 0
+
+meta <- meta %>% mutate(new_x = case_when(
+                                          clusters2 == "Proliferating" & missing3 == "CAVRGRNSGAGSYQLTF_CASSQGGQFNQPQHF" ~ 0.9,
+                                          clusters2 == "Proliferating" & missing3 == "NA_CASSQGGQFNQPQHF" ~ 1.1,
+                                          clusters2 == "Cytotoxic" & missing3 == "CAVRGRNSGAGSYQLTF_CASSQGGQFNQPQHF" ~ 1.9,
+                                          clusters2 == "Cytotoxic" & missing3 == "NA_CASSQGGQFNQPQHF" ~ 2.1,
+                                          clusters2 == "TRM" & missing3 == "CAVRGRNSGAGSYQLTF_CASSQGGQFNQPQHF" ~ 2.9,
+                                          clusters2 == "TRM" & missing3 == "NA_CASSQGGQFNQPQHF" ~ 3.1,
+                                          clusters2 == "Exhausted" & missing3 == "CAVRGRNSGAGSYQLTF_CASSQGGQFNQPQHF" ~ 3.9,
+                                          clusters2 == "Exhausted" & missing3 == "NA_CASSQGGQFNQPQHF" ~ 4.1,
+                                          clusters2 == "Terminally\nExhausted" & missing3 == "CAVRGRNSGAGSYQLTF_CASSQGGQFNQPQHF" ~ 4.9,
+                                          clusters2 == "Terminally\nExhausted" & missing3 == "NA_CASSQGGQFNQPQHF" ~ 5.1))
+
+meta %>% ggplot(aes(x = new_x, y = pct, color = missing3)) +
+         geom_hline(yintercept = 0, color = "black") + geom_vline(xintercept = 0.405, color = "black") +
+         geom_segment(aes(xend = new_x, yend = 0, group = missing3), color = "grey70", linetype = "dashed", linewidth = 1) +
+         geom_point(aes(color = missing3, group = missing3), size = 5) +
+         theme_classic() + ggtitle("") + labs(color = "") +
+         theme(legend.position = "none", axis.title = element_text(size = 20, face = "bold"), panel.ontop = FALSE,
+               axis.line = element_blank(), axis.text = element_text(size = 12, face = "bold"), axis.text.x = element_text(vjust = 0.5), axis.ticks.length.x  = unit(0, "cm")) + 
+         scale_y_continuous(expand = expansion(mult = c(0, 0.03)), limits = c(0, 100)) + ylab("% of Cells") + xlab("Cell Fate") + coord_cartesian(clip = "off") + 
+         scale_color_manual(breaks = c("CAVRGRNSGAGSYQLTF_CASSQGGQFNQPQHF", "NA_CASSQGGQFNQPQHF"), 
+                            values = c("lightpink3", "orange4"),
+                            labels = c("CAVRGRNSGAGSYQLTF_CASSQGGQFNQPQHF", "NA_CASSQGGQFNQPQHF")) +
+         scale_x_discrete(labels = c("Prolferating", "Cytotoxic", "TRM", "Exhausted", "Terminally\nExhausted"), limits = c("1", "2", "3", "4", "5")) +
+         annotate("text", x = 1, y = 90, label = "CDR3 Key:", hjust = 0, size = 6) + 
+         annotate("text", x = 1, y = 83, label = "bold(alpha[1])", parse = TRUE, hjust = 0, size = 6) + annotate("text", x = 1.25, y = 83, label = "= CAVRGRNSGAGSYQLTF", hjust = 0, size = 6) +
+         annotate("text", x = 1, y = 76, label = "bold(beta[1])", parse = TRUE, hjust = 0, size = 6) + annotate("text", x = 1.25, y = 76, label = "= CASSQGGQFNQPQHF", hjust = 0, size = 6)
+
+ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/1d3b.png", width = 2000, height = 1600, units = "px")
+
+```
+
+
+```{r}
+############################################################################
+###                             Figure 1E                                ###
+############################################################################
+
+### All 350x350 for UMAP, 650x400 for lollipop plot
+
+
+### Sub-figure 1
+FetchData(cd8_all, c("umap_1", "umap_2", "extra1")) %>% ggplot() + 
+                                                        geom_point(data = . %>% filter(extra1 == "Other"), aes(x = umap_1, y = umap_2), color = "grey80", size = 0.1, alpha = 0.2) +
+                                                        geom_point(data = . %>% filter(extra1 != "Other"), aes(x = umap_1, y = umap_2, color = extra1), size = 0.1, alpha = 1) +
+                                                        theme_void() + labs(title = "Clone 4", color = "") +
+                                                        theme(legend.position = "bottom", legend.text = element_text(face = "bold", size = 14), legend.title = element_blank(), 
+                                                              plot.title = element_text(size = 20, face = "bold", hjust = 0.5), legend.key.spacing.y = unit(0.01, "cm")) +
+                                                        scale_color_manual(breaks = c("CRDRVMVAGGYNKLIF;CAVRDVDSGAGSYQLTF_CASSDTAYRQETQYF", "CAVRDVDSGAGSYQLTF_CASSDTAYRQETQYF", "CRDRVMVAGGYNKLIF_CASSDTAYRQETQYF"), 
+                                                                           labels =  c("a1 a2 --- b1", "a2 --- b1", "a1 --- b1"), 
+                                                                           values = c("darkgreen", "aquamarine3", "lightgoldenrod3")) +
+                                                        guides(color = guide_legend(nrow = 3, override.aes = list(size = 5), title.position = "top", keywidth = 0.01))
+
+
+ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/1e1a.png", width = 1000, height = 1000, units = "px")
+
+meta <- FetchData(cd8_all, c("umap_1", "umap_2", "extra1", "clusters2")) %>% group_by(extra1) %>% mutate(total = n()) %>% 
+                                                                             group_by(extra1, clusters2) %>% summarise(count = n(),
+                                                                                                                       pct = 100 * n() / first(total))
+meta <- meta %>% ungroup() %>% complete(extra1, clusters2) %>% filter(extra1 != "Other")
+meta[is.na(meta)] <- 0
+
+meta <- meta %>% mutate(new_x = case_when(
+                                          clusters2 == "Proliferating" & extra1 == "CRDRVMVAGGYNKLIF;CAVRDVDSGAGSYQLTF_CASSDTAYRQETQYF" ~ 1.2,
+                                          clusters2 == "Proliferating" & extra1 == "CRDRVMVAGGYNKLIF_CASSDTAYRQETQYF" ~ 1,
+                                          clusters2 == "Proliferating" & extra1 == "CAVRDVDSGAGSYQLTF_CASSDTAYRQETQYF" ~ 0.8,
+                                          clusters2 == "Cytotoxic" & extra1 == "CRDRVMVAGGYNKLIF;CAVRDVDSGAGSYQLTF_CASSDTAYRQETQYF" ~ 2.2,
+                                          clusters2 == "Cytotoxic" & extra1 == "CRDRVMVAGGYNKLIF_CASSDTAYRQETQYF" ~ 2,
+                                          clusters2 == "Cytotoxic" & extra1 == "CAVRDVDSGAGSYQLTF_CASSDTAYRQETQYF" ~ 1.8,
+                                          clusters2 == "TRM" & extra1 == "CRDRVMVAGGYNKLIF;CAVRDVDSGAGSYQLTF_CASSDTAYRQETQYF" ~ 3.2,
+                                          clusters2 == "TRM" & extra1 == "CRDRVMVAGGYNKLIF_CASSDTAYRQETQYF" ~ 3,
+                                          clusters2 == "TRM" & extra1 == "CAVRDVDSGAGSYQLTF_CASSDTAYRQETQYF" ~ 2.8,
+                                          clusters2 == "Exhausted" & extra1 == "CRDRVMVAGGYNKLIF;CAVRDVDSGAGSYQLTF_CASSDTAYRQETQYF" ~ 4.2,
+                                          clusters2 == "Exhausted" & extra1 == "CRDRVMVAGGYNKLIF_CASSDTAYRQETQYF" ~ 4,
+                                          clusters2 == "Exhausted" & extra1 == "CAVRDVDSGAGSYQLTF_CASSDTAYRQETQYF" ~ 3.8,
+                                          clusters2 == "Terminally\nExhausted" & extra1 == "CRDRVMVAGGYNKLIF;CAVRDVDSGAGSYQLTF_CASSDTAYRQETQYF" ~ 5.2,
+                                          clusters2 == "Terminally\nExhausted" & extra1 == "CRDRVMVAGGYNKLIF_CASSDTAYRQETQYF" ~ 5,
+                                          clusters2 == "Terminally\nExhausted" & extra1 == "CAVRDVDSGAGSYQLTF_CASSDTAYRQETQYF" ~ 4.8))
+
+meta %>% ggplot(aes(x = new_x, y = pct, color = extra1)) +
+         geom_hline(yintercept = 0, color = "black") + geom_vline(xintercept = 0.405, color = "black") +
+         geom_segment(aes(xend = new_x, yend = 0, group = extra1), color = "grey70", linetype = "dashed", linewidth = 1) +
+         geom_point(aes(color = extra1, group = extra1), size = 5) +
+         theme_classic() + labs(color = "") +
+         theme(legend.position = "none", axis.title = element_text(size = 20, face = "bold"), panel.ontop = FALSE, plot.title = element_text(hjust = 0.5, face = "bold", size = 20), 
+               axis.line = element_blank(), axis.text = element_text(size = 12, face = "bold"), axis.text.x = element_text(vjust = 0.5), axis.ticks.length.x  = unit(0, "cm")) + 
+         scale_y_continuous(expand = expansion(mult = c(0, 0.03)), limits = c(0, 100)) + ylab("% of Cells") + xlab("Cell Fate") + coord_cartesian(clip = "off") +
+         scale_color_manual(breaks = c("CRDRVMVAGGYNKLIF;CAVRDVDSGAGSYQLTF_CASSDTAYRQETQYF", "CAVRDVDSGAGSYQLTF_CASSDTAYRQETQYF", "CRDRVMVAGGYNKLIF_CASSDTAYRQETQYF"), 
+                            values = c("darkgreen", "aquamarine3", "lightgoldenrod3"),
+                            labels = c("CRDRVMVAGGYNKLIF;CAVRDVDSGAGSYQLTF_CASSDTAYRQETQYF", "CAVRDVDSGAGSYQLTF_CASSDTAYRQETQYF", "CRDRVMVAGGYNKLIF_CASSDTAYRQETQYF")) +
+         scale_x_discrete(labels = c("Proliferating", "Cytotoxic", "TRM", "Exhausted", "Terminally\nExhausted"), limits = c("1", "2", "3", "4", "5")) + 
+         annotate("text", x = 1, y = 90, label = "CDR3 Key:", hjust = 0, size = 6) + 
+         annotate("text", x = 1, y = 83, label = "bold(alpha[1])", parse = TRUE, hjust = 0, size = 6) + annotate("text", x = 1.3, y = 83, label = "= CRDRVMVAGGYNKLIF", hjust = 0, size = 6) +
+         annotate("text", x = 1, y = 76, label = "bold(alpha[2])", parse = TRUE, hjust = 0, size = 6) + annotate("text", x = 1.3, y = 76, label = "= CAVRDVDSGAGSYQLTF", hjust = 0, size = 6) +
+         annotate("text", x = 1, y = 69, label = "bold(beta[1])", parse = TRUE, hjust = 0, size = 6) + annotate("text", x = 1.3, y = 69, label = "= CASSDTAYRQETQYF", hjust = 0, size = 6)
+
+ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/1e1b.png", width = 2000, height = 1600, units = "px")
+
+                                          
+### Sub-figure 2
+FetchData(cd8_all, c("umap_1", "umap_2", "extra2")) %>% ggplot() + 
+                                                        geom_point(data = . %>% filter(extra2 == "Other"), aes(x = umap_1, y = umap_2), color = "grey80", size = 0.1, alpha = 0.2) +
+                                                        geom_point(data = . %>% filter(extra2 != "Other"), aes(x = umap_1, y = umap_2, color = extra2), size = 0.1, alpha = 1) + 
+                                                        theme_void() + labs(title = "Clone 5", color = "") +
+                                                        theme(legend.position = "bottom", legend.text = element_text(face = "bold", size = 14), legend.title = element_blank(), 
+                                                              plot.title = element_text(size = 20, face = "bold", hjust = 0.5), legend.key.spacing.y = unit(0.01, "cm")) +
+                                                        scale_color_manual(breaks = c("CAVRDYGGATNKLIF;CAVEVYGGATNKLIF_CASSGQASYEQYV", "CAVEVYGGATNKLIF_CASSGQASYEQYV", "CAVRDYGGATNKLIF_CASSGQASYEQYV"), 
+                                                                           labels =  c("α1 α2 --- β1", "α2 --- β1", "α1 --- β1"), 
+                                                                           values = c("darkgreen", "aquamarine3", "lightgoldenrod3")) +
+                                                        guides(color = guide_legend(nrow = 3, override.aes = list(size = 5), title.position = "top", keywidth = 0.01))
+
+ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/1e2a.png", width = 1000, height = 1000, units = "px")
+
+meta <- FetchData(cd8_all, c("umap_1", "umap_2", "extra2", "clusters2")) %>% group_by(extra2) %>% mutate(total = n()) %>% 
+                                                                             group_by(extra2, clusters2) %>% summarise(count = n(),
+                                                                                                                       pct = 100 * n() / first(total))
+meta <- meta %>% ungroup() %>% complete(extra2, clusters2) %>% filter(extra2 != "Other")
+meta[is.na(meta)] <- 0
+
+meta <- meta %>% mutate(new_x = case_when(
+                                          clusters2 == "Proliferating" & extra2 == "CAVRDYGGATNKLIF;CAVEVYGGATNKLIF_CASSGQASYEQYV" ~ 1.2,
+                                          clusters2 == "Proliferating" & extra2 == "CAVEVYGGATNKLIF_CASSGQASYEQYV" ~ 1,
+                                          clusters2 == "Proliferating" & extra2 == "CAVRDYGGATNKLIF_CASSGQASYEQYV" ~ 0.8,
+                                          clusters2 == "Cytotoxic" & extra2 == "CAVRDYGGATNKLIF;CAVEVYGGATNKLIF_CASSGQASYEQYV" ~ 2.2,
+                                          clusters2 == "Cytotoxic" & extra2 == "CAVEVYGGATNKLIF_CASSGQASYEQYV" ~ 2,
+                                          clusters2 == "Cytotoxic" & extra2 == "CAVRDYGGATNKLIF_CASSGQASYEQYV" ~ 1.8,
+                                          clusters2 == "TRM" & extra2 == "CAVRDYGGATNKLIF;CAVEVYGGATNKLIF_CASSGQASYEQYV" ~ 3.2,
+                                          clusters2 == "TRM" & extra2 == "CAVEVYGGATNKLIF_CASSGQASYEQYV" ~ 3,
+                                          clusters2 == "TRM" & extra2 == "CAVRDYGGATNKLIF_CASSGQASYEQYV" ~ 2.8,
+                                          clusters2 == "Exhausted" & extra2 == "CAVRDYGGATNKLIF;CAVEVYGGATNKLIF_CASSGQASYEQYV" ~ 4.2,
+                                          clusters2 == "Exhausted" & extra2 == "CAVEVYGGATNKLIF_CASSGQASYEQYV" ~ 4,
+                                          clusters2 == "Exhausted" & extra2 == "CAVRDYGGATNKLIF_CASSGQASYEQYV" ~ 3.8,
+                                          clusters2 == "Terminally\nExhausted" & extra2 == "CAVRDYGGATNKLIF;CAVEVYGGATNKLIF_CASSGQASYEQYV" ~ 5.2,
+                                          clusters2 == "Terminally\nExhausted" & extra2 == "CAVEVYGGATNKLIF_CASSGQASYEQYV" ~ 5,
+                                          clusters2 == "Terminally\nExhausted" & extra2 == "CAVRDYGGATNKLIF_CASSGQASYEQYV" ~ 4.8))
+
+
+meta %>% ggplot(aes(x = new_x, y = pct, color = extra2)) +
+         geom_hline(yintercept = 0, color = "black") + geom_vline(xintercept = 0.405, color = "black") +
+         geom_segment(aes(xend = new_x, yend = 0, group = extra2), color = "grey70", linetype = "dashed", linewidth = 1) +
+         geom_point(aes(color = extra2, group = extra2), size = 5) +
+         theme_classic() + ggtitle("") + labs(color = "") +
+         theme(legend.position = "none", axis.title = element_text(size = 20, face = "bold"), panel.ontop = FALSE,
+               axis.line = element_blank(), axis.text = element_text(size = 12, face = "bold"), axis.text.x = element_text(vjust = 0.5), axis.ticks.length.x  = unit(0, "cm")) + 
+         scale_y_continuous(expand = expansion(mult = c(0, 0.03)), limits = c(0, 100)) + ylab("% of Cells") + xlab("Cell Fate") + coord_cartesian(clip = "off") + 
+         scale_color_manual(breaks = c("CAVRDYGGATNKLIF;CAVEVYGGATNKLIF_CASSGQASYEQYV", "CAVEVYGGATNKLIF_CASSGQASYEQYV", "CAVRDYGGATNKLIF_CASSGQASYEQYV"), 
+                            values = c("darkgreen", "aquamarine3", "lightgoldenrod3"),
+                            labels = c("CAVRDYGGATNKLIF;CAVEVYGGATNKLIF_CASSGQASYEQYV", "CAVEVYGGATNKLIF_CASSGQASYEQYV", "CAVRDYGGATNKLIF_CASSGQASYEQYV")) +
+         scale_x_discrete(labels = c("Prolferating", "Cytotoxic", "TRM", "Exhausted", "Terminally\nExhausted"), limits = c("1", "2", "3", "4", "5")) +
+         annotate("text", x = 1, y = 90, label = "CDR3 Key:", hjust = 0, size = 6) + 
+         annotate("text", x = 1, y = 83, label = "bold(alpha[1])", parse = TRUE, hjust = 0, size = 6) + annotate("text", x = 1.3, y = 83, label = "= CAVRDYGGATNKLIF", hjust = 0, size = 6) +
+         annotate("text", x = 1, y = 76, label = "bold(alpha[2])", parse = TRUE, hjust = 0, size = 6) + annotate("text", x = 1.3, y = 76, label = "= CAVEVYGGATNKLIF", hjust = 0, size = 6) +
+         annotate("text", x = 1, y = 69, label = "bold(beta[1])", parse = TRUE, hjust = 0, size = 6) + annotate("text", x = 1.3, y = 69, label = "= CASSGQASYEQYV", hjust = 0, size = 6)
+
+ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/1e2b.png", width = 2000, height = 1600, units = "px")
+
+
+### Sub-figure 3
+FetchData(cd8_all, c("umap_1", "umap_2", "extra3")) %>% ggplot() + 
+                                                        geom_point(data = . %>% filter(extra3 == "Other"), aes(x = umap_1, y = umap_2), color = "grey80", size = 0.1, alpha = 0.2) +
+                                                        geom_point(data = . %>% filter(extra3 != "Other"), aes(x = umap_1, y = umap_2, color = extra3), size = 0.1, alpha = 1) + 
+                                                        theme_void() + labs(title = "Clone 6", color = "") +
+                                                        theme(legend.position = "bottom", legend.text = element_text(face = "bold", size = 14), legend.title = element_blank(), 
+                                                              plot.title = element_text(size = 20, face = "bold", hjust = 0.5), legend.key.spacing.y = unit(0.01, "cm")) +
+                                                        scale_color_manual(breaks = c("CALGPYGNNRLAF;CVVFRHGQNFVF_CSARGGQGIRQETQYF", "CVVFRHGQNFVF_CSARGGQGIRQETQYF", "CALGPYGNNRLAF_CSARGGQGIRQETQYF"), 
+                                                                           labels =  c("α1 α2 --- β1", "α2 --- β1", "α1 --- β1"), 
+                                                                           values = c("darkgreen", "aquamarine3", "lightgoldenrod3")) +
+                                                        guides(color = guide_legend(nrow = 3, override.aes = list(size = 5), title.position = "top", keywidth = 0.01))
+
+ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/1e3a.png", width = 1000, height = 1000, units = "px")
+
+
+meta <- FetchData(cd8_all, c("umap_1", "umap_2", "extra3", "clusters2")) %>% group_by(extra3) %>% mutate(total = n()) %>% 
+                                                                             group_by(extra3, clusters2) %>% summarise(count = n(),
+                                                                                                                       pct = 100 * n() / first(total))
+meta <- meta %>% ungroup() %>% complete(extra3, clusters2) %>% filter(extra3 != "Other")
+meta[is.na(meta)] <- 0
+
+meta <- meta %>% mutate(new_x = case_when(
+                                          clusters2 == "Proliferating" & extra3 == "CALGPYGNNRLAF;CVVFRHGQNFVF_CSARGGQGIRQETQYF" ~ 1.2,
+                                          clusters2 == "Proliferating" & extra3 == "CVVFRHGQNFVF_CSARGGQGIRQETQYF" ~ 1,
+                                          clusters2 == "Proliferating" & extra3 == "CALGPYGNNRLAF_CSARGGQGIRQETQYF" ~ 0.8,
+                                          clusters2 == "Cytotoxic" & extra3 == "CALGPYGNNRLAF;CVVFRHGQNFVF_CSARGGQGIRQETQYF" ~ 2.2,
+                                          clusters2 == "Cytotoxic" & extra3 == "CVVFRHGQNFVF_CSARGGQGIRQETQYF" ~ 2,
+                                          clusters2 == "Cytotoxic" & extra3 == "CALGPYGNNRLAF_CSARGGQGIRQETQYF" ~ 1.8,
+                                          clusters2 == "TRM" & extra3 == "CALGPYGNNRLAF;CVVFRHGQNFVF_CSARGGQGIRQETQYF" ~ 3.2,
+                                          clusters2 == "TRM" & extra3 == "CVVFRHGQNFVF_CSARGGQGIRQETQYF" ~ 3,
+                                          clusters2 == "TRM" & extra3 == "CALGPYGNNRLAF_CSARGGQGIRQETQYF" ~ 2.8,
+                                          clusters2 == "Exhausted" & extra3 == "CALGPYGNNRLAF;CVVFRHGQNFVF_CSARGGQGIRQETQYF" ~ 4.2,
+                                          clusters2 == "Exhausted" & extra3 == "CVVFRHGQNFVF_CSARGGQGIRQETQYF" ~ 4,
+                                          clusters2 == "Exhausted" & extra3 == "CALGPYGNNRLAF_CSARGGQGIRQETQYF" ~ 3.8,
+                                          clusters2 == "Terminally\nExhausted" & extra3 == "CALGPYGNNRLAF;CVVFRHGQNFVF_CSARGGQGIRQETQYF" ~ 5.2,
+                                          clusters2 == "Terminally\nExhausted" & extra3 == "CVVFRHGQNFVF_CSARGGQGIRQETQYF" ~ 5,
+                                          clusters2 == "Terminally\nExhausted" & extra3 == "CALGPYGNNRLAF_CSARGGQGIRQETQYF" ~ 4.8))
+
+meta %>% ggplot(aes(x = new_x, y = pct, color = extra3)) +
+         geom_hline(yintercept = 0, color = "black") + geom_vline(xintercept = 0.405, color = "black") +
+         geom_segment(aes(xend = new_x, yend = 0, group = extra3), color = "grey70", linetype = "dashed", linewidth = 1) +
+         geom_point(aes(color = extra3, group = extra3), size = 5) +
+         theme_classic() + ggtitle("") + labs(color = "") +
+         theme(legend.position = "none", axis.title = element_text(size = 20, face = "bold"), panel.ontop = FALSE,
+               axis.line = element_blank(), axis.text = element_text(size = 12, face = "bold"), axis.text.x = element_text(vjust = 0.5), axis.ticks.length.x  = unit(0, "cm")) + 
+         scale_y_continuous(expand = expansion(mult = c(0, 0.03)), limits = c(0, 100)) + ylab("% of Cells") + xlab("Cell Fate") + coord_cartesian(clip = "off") + 
+         scale_color_manual(breaks = c("CALGPYGNNRLAF;CVVFRHGQNFVF_CSARGGQGIRQETQYF", "CVVFRHGQNFVF_CSARGGQGIRQETQYF", "CALGPYGNNRLAF_CSARGGQGIRQETQYF"), 
+                            values = c("darkgreen", "aquamarine3", "lightgoldenrod3"),
+                            labels = c("CALGPYGNNRLAF;CVVFRHGQNFVF_CSARGGQGIRQETQYF", "CVVFRHGQNFVF_CSARGGQGIRQETQYF", "CALGPYGNNRLAF_CSARGGQGIRQETQYF")) +
+         scale_x_discrete(labels = c("Prolferating", "Cytotoxic", "TRM", "Exhausted", "Terminally\nExhausted"), limits = c("1", "2", "3", "4", "5")) +
+         annotate("text", x = 1, y = 90, label = "CDR3 Key:", hjust = 0, size = 6) + 
+         annotate("text", x = 1, y = 83, label = "bold(alpha[1])", parse = TRUE, hjust = 0, size = 6) + annotate("text", x = 1.3, y = 83, label = "= CALGPYGNNRLAF", hjust = 0, size = 6) +
+         annotate("text", x = 1, y = 76, label = "bold(alpha[2])", parse = TRUE, hjust = 0, size = 6) + annotate("text", x = 1.3, y = 76, label = "= CVVFRHGQNFVF", hjust = 0, size = 6) +
+         annotate("text", x = 1, y = 69, label = "bold(beta[1])", parse = TRUE, hjust = 0, size = 6) + annotate("text", x = 1.3, y = 69, label = "= CSARGGQGIRQETQYF", hjust = 0, size = 6)
+
+ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/1e3b.png", width = 2000, height = 1600, units = "px")
+          
+
+```
+

@@ -1,0 +1,411 @@
+---
+title: "extendedData_figure2"
+output: html_document
+date: "2025-09-18"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(Seurat)
+library(scRepertoire)
+library(VDJdive)
+library(rstatix)
+library(readxl)
+library(ggpubr)
+library(ggsci)
+
+source("/home/ecb86/Desktop/R_tools/ECLIPSE.R")
+source("/home/ecb86/Desktop/R_tools/VDJdive_ECLIPSE_paperFunctions.R")
+set.seed(16)
+```
+
+```{r}
+############################################################################
+###                         Pre-Processing                               ###
+############################################################################
+
+braun <- readRDS("/home/ecb86/Desktop/braun/rotation/Braun_cancer_cell/scRCC_SeuratObject.rds")
+
+braun@meta.data <- braun@meta.data %>% separate(Sample, into = c("donor", "tissue"), remove = FALSE, sep = "_")
+braun@meta.data <- braun@meta.data %>% mutate(tissue = case_when(
+                                                                 tissue %in% c("T", "T2") ~ "Tumor",
+                                                                 tissue == "N" ~ "Normal",
+                                                                 tissue %in% c("M", "V")  ~ "Other"))
+
+cd8 <- subset(braun, subset = ClusterName_TCells %in% c("Treg", "Activated CD4.1", "Activated CD4.2", "CD4 TCM.1", "CD4 TCM.2", "Mito-high T cells", "-1"), invert = TRUE)
+
+dirs <- list.files("/gpfs/gibbs/pi/braun/ecb86/braun_cancerCell/realignment", recursive = TRUE, pattern = "all_contig_annotations\\.csv$", full.names = TRUE)
+dirs <- dirs[!str_detect(dirs, "SC_VDJ_ASSEMBLER_CS")]
+dirs <- str_replace(dirs, "all.*$", "")
+
+matching <- read.csv("/home/ecb86/project/david/sc_datasets/braun_cancer_cell/braun_matching2.csv")
+matching <- matching %>% filter(Sample != "")
+
+cd8@meta.data <- cd8@meta.data %>% left_join(matching[, 2:3], by = "Sample")
+cd8@meta.data <- as.data.frame(cd8@meta.data)
+rownames(cd8@meta.data) <- cd8$Cell_barcode
+cd8$Cell_Barcode <- str_replace(cd8$Cell_barcode, "\\-.*$", "-1")
+
+ElbowPlot(cd8, ndims = 50)
+cd8 <- RunUMAP(cd8, dims = 1:30)
+
+cd8$ClusterName_TCells[cd8$ClusterName_TCells == "PMCH+ terminally Exhausted CD8.1"] <- "PMCH+ terminally \n Exhausted CD8.1"
+cd8$ClusterName_TCells[cd8$ClusterName_TCells == "Terminally exhausted CD8.2"] <- "Terminally \n exhausted CD8.2"
+cd8$ClusterName_TCells[cd8$ClusterName_TCells == "Terminally exhausted CD8.3"] <- "Terminally \n exhausted CD8.3"
+
+cd8s <- ECLIPSE(folders = dirs, file_type = "all", seurat_object = cd8, batch = "index", donor = "donor", group = "donor", original_barcode = "Cell_Barcode", write_folder = "/home/ecb86/Desktop/braun/ECLIPSE/braun_cCell/tcr_temp", mode = "standard")
+
+cd8s <- tcrDoubletDetect(cd8s)
+```
+
+```{r}
+############################################################################
+###                             Figure S2A                               ###
+############################################################################
+
+df <- compareClones(cd8s, clusters = "ClusterName_TCells", cloneThresh = 100, cloneClassThresh = 10)
+
+df2 <- df[[1]] %>% group_by(Sample, class) %>% summarise(mn_count = mean(nCount_RNA),
+                                                         mn_feat = mean(nFeature_RNA),
+                                                         md_count = median(nCount_RNA),
+                                                         md_feat = median(nFeature_RNA),
+                                                         count = n()) %>% ungroup()
+
+slim <- df2 %>% filter(class != "Other" & count >= 3)
+
+slim2 <- slim %>% ungroup() %>%
+                    select(Sample, class, md_count) %>%
+                    pivot_wider(
+                                names_from = class,
+                                values_from = md_count)
+
+results <- runPairedTests(slim2, groups = c("1°\n&\n2°", "NA", "2°", "1°"), adjustment_method = "fdr", runPaired = TRUE)
+results$y.position <- c(8000, 8600, 9200, 9200, 9800, 10400)
+
+data <- as.data.frame(slim2)
+data <- data[!is.na(data[, "NA"]) & !is.na(data[, "1°\n&\n2°"]), ]
+test <- wilcox.test(data[, "NA"], data[, "1°\n&\n2°"], paired = TRUE)
+
+slim$class <- factor(slim$class, levels = c("1°\n&\n2°", "1°", "2°", "NA"))
+slim <- slim %>% arrange(class)
+### 600x500. Supplemental
+slim %>% ggplot(aes(x = class, y = md_count)) + 
+         geom_boxplot(aes(fill = class), outlier.size = -1, width = 0.4, linewidth = 1.3) +
+         geom_path(aes(group = Sample), alpha = 0.3) + 
+         geom_point(color = "grey40", fill = "white", shape = 21, stroke = 1, size = 2) +
+         stat_pvalue_manual(results, label = "p.adj2", size = 4, tip.length = 0) +
+         theme_classic() + xlab("Chain Sequenced") + ylab("Median RNA Counts") + 
+         scale_x_discrete(labels = c("Both\nBitypic", "Major\nBitypic", "Minor\nBitypic", "Only\nMonotypic"), limits = c("1°\n&\n2°", "1°", "2°", "NA")) +
+         theme(axis.text = element_text(size = 16, face = "bold"), axis.title = element_text(size = 20, face = "bold"), legend.position = "none",
+               axis.title.x = element_text(vjust = -1), plot.margin = unit(c(1, 0, 3, 0), "lines")) +
+         labs(fill = "") + scale_fill_npg()
+
+ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/s2a.png", width = 3000, height = 2500, units = "px")
+
+```
+
+
+```{r}
+############################################################################
+###                             Figure S2B                               ###
+############################################################################
+
+
+slim3 <- slim %>% ungroup() %>%
+                    select(Sample, class, md_feat) %>%
+                    pivot_wider(
+                                names_from = class,
+                                values_from = md_feat)
+
+results <- runPairedTests(slim3, groups = c("1°\n&\n2°", "NA", "2°", "1°"), adjustment_method = "fdr", runPaired = TRUE)
+results$y.position <- c(3000, 3200, 3400, 3400, 3600, 3800)
+
+slim$class <- factor(slim$class, levels = c("1°\n&\n2°", "1°", "2°", "NA"))
+slim <- slim %>% arrange(class)
+
+
+slim %>% ggplot(aes(x = class, y = md_feat)) + 
+         geom_boxplot(aes(fill = class), outlier.size = -1, width = 0.4, linewidth = 1.2) +
+         geom_path(aes(group = Sample), alpha = 0.3) + 
+         geom_point(color = "grey40", fill = "white", shape = 21, stroke = 1, size = 2) +
+         stat_pvalue_manual(results, label = "p.adj2", size = 4, tip.length = 0) +
+         theme_classic() + xlab("Chain Sequenced") + ylab("Median Unique Genes\n(RNA Features)") + 
+         scale_x_discrete(labels = c("Both\nBitypic", "Major\nBitypic", "Minor\nBitypic", "Only\nMonotypic"), limits = c("1°\n&\n2°", "1°", "2°", "NA")) +
+         theme(axis.text = element_text(size = 16, face = "bold"), axis.title = element_text(size = 20, face = "bold"), legend.position = "none",
+               axis.title.x = element_text(vjust = -1), plot.margin = unit(c(1, 0, 3, 0), "lines")) +
+         labs(fill = "") + scale_fill_npg()
+
+ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/s2b.png", width = 3000, height = 2500, units = "px")
+```
+
+```{r}
+############################################################################
+###                             Figure S2E                               ###
+############################################################################
+df <- cd8s@meta.data %>% mutate(specialClone = case_when(
+                                                         cloneCallSource == "VDJdive" & str_detect(CTaa, ":::") ~ "Combo",
+                                                         cloneCallSource == "VDJdive" & !str_detect(CTaa, ":::") ~ "Regular",
+                                                         cloneCallSource == "scRepertoire" ~ "Ambiguous",
+                                                         is.na(cloneCallSource) ~ "No TCR"))
+
+df2 <- df %>% group_by(Sample, specialClone) %>% summarise(mn_count = mean(nCount_RNA),
+                                                           mn_feat = mean(nFeature_RNA),
+                                                           md_count = median(nCount_RNA),
+                                                           md_feat = median(nFeature_RNA),
+                                                           count = n()) %>% ungroup()
+
+df2 <- df2 %>% filter(count >= 3)
+
+df3 <- df2 %>% ungroup() %>%
+                            select(Sample, specialClone, md_count) %>%
+                            pivot_wider(
+                                        names_from = specialClone,
+                                        values_from = md_count)
+results <- runPairedTests(df3, groups = c("Regular", "No TCR", "Ambiguous", "Combo"), adjustment_method = "fdr", runPaired = TRUE)
+results$y.position <- c(8000, 8500, 9000, 9000, 9500, 10000)
+
+df2$specialClone <- factor(df2$specialClone, levels = c("Regular", "Combo", "Ambiguous", "No TCR"))
+df2 <- df2 %>% arrange(specialClone)
+
+### 700x600
+df2  %>% ggplot(aes(x = specialClone, y = md_count)) + 
+         geom_boxplot(aes(fill = specialClone), outlier.size = -1, width = 0.4, linewidth = 1.2) +
+         geom_path(aes(group = Sample), alpha = 0.3)  +
+         geom_point(color = "grey40", fill = "white", shape = 21, stroke = 1, size = 2) +
+         stat_pvalue_manual(results, label = "p.adj2", size = 4, tip.length = 0) +
+         theme_classic() + xlab("Type of Clone") + ylab("Median RNA Counts") + 
+         scale_x_discrete(labels = c("2 TCR\nChain\nClones", "3 TCR\nChain\nClones", "Ambiguous\nChain\nCount", "No TCR\nDetected"), limits = c("Regular", "Combo", "Ambiguous", "No TCR")) +
+         theme(axis.text = element_text(size = 16, face = "bold"), axis.title = element_text(size = 20, face = "bold"), legend.position = "none",
+               axis.title.x = element_text(vjust = -1), plot.margin = unit(c(1, 0, 3, 0), "lines")) +
+         labs(fill = "") + scale_fill_atlassian()
+
+ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/s2e.png", width = 2500, height = 2500, units = "px")
+```
+
+```{r}
+############################################################################
+###                             Figure S2F                               ###
+############################################################################
+
+df4 <- df2 %>% ungroup() %>%
+                            select(Sample, specialClone, md_feat) %>%
+                            pivot_wider(
+                                        names_from = specialClone,
+                                        values_from = md_feat)
+results <- runPairedTests(df4, groups = c("Regular", "No TCR", "Ambiguous", "Combo"), adjustment_method = "fdr", runPaired = TRUE)
+results$y.position <- c(3000, 3200, 3400, 3400, 3600, 3800)
+
+df2$specialClone <- factor(df2$specialClone, levels = c("Regular", "Combo", "Ambiguous", "No TCR"))
+df2 <- df2 %>% arrange(specialClone)
+
+
+df2  %>% ggplot(aes(x = specialClone, y = md_feat)) + 
+         geom_boxplot(aes(fill = specialClone), outlier.size = -1, width = 0.4) +
+         geom_path(aes(group = Sample), alpha = 0.3)  +
+         geom_point(color = "grey40", fill = "white", shape = 21, stroke = 1, size = 2) +
+         stat_pvalue_manual(results, label = "p.adj2", size = 4, tip.length = 0) +
+         theme_classic() + xlab("Type of Clone") + ylab("Median Unique Genes\n(RNA Features)") + 
+         scale_x_discrete(labels = c("2 TCR\nChain\nClones", "3 TCR\nChain\nClones", "Ambiguous\nChain\nCount", "No TCR\nDetected"), limits = c("Regular", "Combo", "Ambiguous", "No TCR")) +
+         theme(axis.text = element_text(size = 16, face = "bold"), axis.title = element_text(size = 20, face = "bold"), legend.position = "none",
+               axis.title.x = element_text(vjust = -1), plot.margin = unit(c(1, 0, 3, 0), "lines")) +
+         labs(fill = "") + scale_fill_atlassian()
+
+ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/s2f.png", width = 2500, height = 2500, units = "px")
+```
+
+```{r}
+############################################################################
+###                             Figure S2C/D Pre-Processing              ###
+############################################################################
+library(scDblFinder)
+library(BiocParallel)
+
+sce <- as.SingleCellExperiment(braun)
+sce <- scDblFinder(sce, samples = "Sample", BPPARAM = MulticoreParam(3), clusters = "ClusterName_AllCells", dbr = 0.001)
+## Should run in <10 minutes when run first
+table(sce$scDblFinder.class)
+
+meta <- as.data.frame(sce@colData@listData)
+meta <- meta[, c(1, 34:38)]
+write.csv(meta, "/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/scDblFinder_output_realigned.csv", row.names = FALSE)
+```
+
+
+
+```{r}
+############################################################################
+###                             Figure S2C                               ###
+############################################################################
+
+meta <- read.csv("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/scDblFinder_output_realigned.csv")
+
+cd8s@meta.data <- cd8s@meta.data %>% left_join(meta, by = "Cell_barcode")
+cd8s@meta.data <- as.data.frame(cd8s@meta.data)
+rownames(cd8s@meta.data) <- cd8s$Cell_barcode
+
+df <- cd8s@meta.data %>% mutate(specialClone = case_when(
+                                                         cloneCallSource == "VDJdive" & str_detect(CTaa, ":::") ~ "Combo",
+                                                         cloneCallSource == "VDJdive" & !str_detect(CTaa, ":::") ~ "Regular",
+                                                         cloneCallSource == "scRepertoire" ~ "Ambiguous",
+                                                         is.na(cloneCallSource) ~ "No TCR"))
+
+db <- df %>% group_by(Sample, specialClone) %>% summarise(count = n(),
+                                                          md_score = median(scDblFinder.score),
+                                                          mn_score = mean(scDblFinder.score))
+
+db <- db %>% filter(count >= 3)
+
+db2 <- db %>% ungroup() %>% select(Sample, specialClone, md_score) %>%
+                            pivot_wider(names_from = specialClone,
+                                        values_from = md_score)
+
+results <- runPairedTests(db2, groups = c("Regular", "No TCR", "Ambiguous", "Combo"), adjustment_method = "fdr", runPaired = TRUE)
+results$y.position <- c(0.62, 0.67, 0.72, 0.72, 0.77, 0.82)
+
+db$specialClone <- factor(db$specialClone, levels = c("Regular", "Combo", "Ambiguous", "No TCR"))
+db <- db %>% arrange(specialClone)
+
+
+db   %>% ggplot(aes(x = specialClone, y = md_score)) + 
+         geom_boxplot(aes(fill = specialClone), outlier.size = -1, width = 0.4, linewidth = 1.2) +
+         geom_path(aes(group = Sample), alpha = 0.3)  +
+         geom_point(color = "grey40", fill = "white", shape = 21, stroke = 1, size = 2) +
+         stat_pvalue_manual(results, label = "p.adj2", size = 4, tip.length = 0) +
+         theme_classic() + xlab("Type of Clone") + ylab("Median Doublet Score") + 
+         scale_x_discrete(labels = c("2 TCR\nChain\nClones", "3 TCR\nChain\nClones", "Ambiguous\nChain\nCount", "No TCR\nDetected"), limits = c("Regular", "Combo", "Ambiguous", "No TCR")) +
+         theme(axis.text = element_text(size = 16, face = "bold"), axis.title = element_text(size = 20, face = "bold"), legend.position = "none",
+               axis.title.x = element_text(vjust = -1), plot.margin = unit(c(1, 0, 3, 0), "lines")) +
+         labs(fill = "") + scale_fill_atlassian()
+
+ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/s2c.png", width = 3000, height = 2500, units = "px")
+```
+
+```{r}
+############################################################################
+###                             Figure S2D                               ###
+############################################################################
+
+db3 <- df %>% mutate(doubletStatus = case_when(
+                                               str_detect(scR_CTaa, ";") & cloneCallSource == "VDJdive" & str_detect(CTaa, ":::") & !str_detect(scR_CTaa, "^NA_|_NA$") & str_replace_all(scR_CTaa, ";", ":::") == CTaa ~ "fake",
+                                               str_detect(scR_CTaa, ";") & cloneCallSource == "VDJdive" & !str_detect(CTaa, ":::") & !str_detect(scR_CTaa, "^NA_|_NA$") ~ "maybe_real",
+                                               !str_detect(scR_CTaa, ";") & cloneCallSource == "VDJdive" & !str_detect(CTaa, ":::") & !str_detect(scR_CTaa, "^NA_|_NA$") ~ "1-1",
+                                               is.na(CTaa) ~ "No TCR",
+                                               TRUE ~ "Other"))
+
+
+db4 <- db3 %>% group_by(Sample, doubletStatus) %>% summarise(count = n(),
+                                                             md_score = median(scDblFinder.score),
+                                                             mn_score = mean(scDblFinder.score))
+
+   
+db5 <- db4 %>% filter(count >= 3 & doubletStatus != "Other")
+
+db6 <- db5 %>% ungroup() %>% select(Sample, doubletStatus, md_score) %>%
+                            pivot_wider(names_from = doubletStatus,
+                                        values_from = md_score)
+
+results <- runPairedTests(db6, groups = c("fake", "No TCR", "1-1", "maybe_real"), adjustment_method = "fdr", runPaired = TRUE)
+results$y.position <- c(0.7, 0.75, 0.8, 0.8, 0.85, 0.9)
+
+db5$doubletStatus <- factor(db5$doubletStatus, levels = c("fake", "maybe_real", "1-1", "No TCR"))
+db5 <- db5 %>% arrange(doubletStatus)
+
+
+db5  %>% ggplot(aes(x = doubletStatus, y = md_score)) + 
+         geom_boxplot(aes(fill = doubletStatus), outlier.size = -1, width = 0.4, linewidth = 1.2) + 
+         geom_path(aes(group = Sample), alpha = 0.3) + 
+         geom_point(color = "grey40", fill = "white", shape = 21, stroke = 1, size = 2) +
+         stat_pvalue_manual(results, label = "p.adj2", size = 4, tip.length = 0) +
+         theme_classic() + xlab("Type of Clone") + ylab("Median Doublet Score") + 
+         theme(axis.text = element_text(size = 16, face = "bold"), axis.title = element_text(size = 20, face = "bold"), legend.position = "none",
+               axis.title.x = element_text(vjust = -1), plot.margin = unit(c(1, 0, 3, 0), "lines"), axis.text.x = element_blank(), axis.ticks.x = element_blank()) +
+         labs(fill = "") + scale_fill_cosmic("hallmarks_light")
+
+ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/s2d.png", width = 3000, height = 2500, units = "px")
+```
+
+
+```{r}
+############################################################################
+###                             Figure S2G                               ###
+############################################################################
+airr_files <- list.files("/gpfs/gibbs/project/braun/ecb86/david/ECLIPSE/paper_realigned/trust4", pattern = "airr\\.tsv", full.name = TRUE)
+airr_files <- airr_files[!str_detect(airr_files, "barcode_airr")]
+
+lanes <- str_replace(airr_files, "^.*trust4/", "")
+lanes <- str_replace(lanes, "_airr\\.tsv", "")
+samples <- str_replace(lanes, "-.*$", "")
+
+full <- data.frame()
+
+for (i in 1:length(airr_files)) {
+  
+  temp <- read_tsv(airr_files[i])
+  temp$lane <- lanes[i]
+  temp$sample <- samples[i]
+  
+  full <- rbind(full, temp)
+}
+
+full <- full %>% filter(locus %in% c("TRA", "TRB") & !is.na(junction_aa))
+
+full$sample <- str_replace(full$sample, "N", "_N")
+full$sample <- str_replace(full$sample, "T", "_T")
+full$sample <- str_replace(full$sample, "V", "_V")
+full$sample <- str_replace(full$sample, "M", "_M")
+full$sample <- str_replace(full$sample, "S10_T", "S10_T2")
+
+full$Cell_Barcode <- str_replace(full$sequence_id, "_.*$", "-1")
+full$trust_bc <- paste(full$Cell_Barcode, full$sample, sep = "_")
+
+cd8s$trust_bc <- paste(cd8s$Cell_Barcode, cd8s$Sample, sep = "_")
+
+trust4 <- full %>% left_join(cd8s@meta.data, by = "trust_bc")
+trust4 <- trust4 %>% filter(!is.na(Cell_barcode))
+
+trust4 <- trust4 %>% rowwise() %>% mutate(sequenced = str_detect(scR_CTaa, paste("^", junction_aa, "_|;", junction_aa, "_|^", junction_aa, ";", sep = "")) |
+                                                      str_detect(scR_CTaa, paste("_", junction_aa, "$|_", junction_aa, ";|;", junction_aa, "$", sep = "")),
+                                          predicted = str_detect(CTaa, paste("^", junction_aa, "_|:::", junction_aa, "_|^", junction_aa, ":::", sep = "")) | 
+                                                      str_detect(CTaa, paste("_", junction_aa, "$|_", junction_aa, ":::|:::", junction_aa, "$", sep = "")))
+trust4 <- trust4 %>% rowwise() %>% mutate(trust_status = case_when(
+                                                                   is.na(CTaa) ~ "No TCR",
+                                                                   sequenced & predicted ~ "seq and pred",
+                                                                   !sequenced & predicted ~ "not seq but pred",
+                                                                   sequenced & !predicted ~ "seq but not pred",
+                                                                   !sequenced & !predicted ~ "not seq not pred"))
+
+
+trust_slim <- trust4 %>% select(Cell_Barcode.x, scR_CTaa, CTaa, cloneCallSource, junction_aa, locus, trust_status)
+snp <- trust_slim %>% filter(trust_status == "not seq but pred")
+
+                           
+
+snp <- snp %>% rowwise() %>% mutate(type = case_when(
+                                                     str_detect(CTaa, ":::") ~ "3 Chain\nClone",
+                                                     !str_detect(CTaa, ":::") ~ "2 Chain\nClone"))
+
+snp2 <- snp %>% group_by(locus) %>% mutate(chainCount = n()) %>%
+                group_by(locus, type) %>% summarise(pct = 100 * n() / first(chainCount),
+                                                    count = n(),
+                                                    chainCount = first(chainCount))
+         
+snp2 %>% ggplot(aes(x = locus, y = pct, fill = type)) + 
+         geom_col() + theme_classic() +
+         ylab("% of cells") + xlab("") + 
+         scale_x_discrete(limits = c("TRA", "TRB"),
+                          label = c("TCRα", "TCRβ"),
+                          expand = expansion(mult = c(0.5, 0.5))) +
+         theme(axis.text = element_text(size = 14), axis.title = element_text(size = 20), legend.title = element_text(hjust = 0.5)) +
+         scale_y_continuous(expand = c(0.01, 0.01)) + xlab("Recovered\nChain Type") +
+         scale_fill_atlassian(limits = c("2 Chain\nClone", "3 Chain\nClone"),
+                              labels = c("2", "3"),
+                              guide = guide_legend(title = "Number\nof Chains\nin Clone", title.hjust = 0.5)) +
+         theme(axis.text = element_text(size = 14, face = "bold"), axis.title = element_text(size = 20, face = "bold"), 
+               legend.title = element_text(size = 14, face = "bold"), legend.text = element_text(size = 14, face = "bold"))
+
+ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/s2g.png", width = 1200, height = 2400, units = "px")
+```

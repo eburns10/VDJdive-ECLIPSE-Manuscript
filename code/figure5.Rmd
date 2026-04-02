@@ -1,0 +1,593 @@
+---
+title: "figure5"
+output: html_document
+date: "2026-01-16"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(Seurat)
+library(scRepertoire)
+library(VDJdive)
+library(rstatix)
+library(readxl)
+library(ggpubr)
+library(RColorBrewer)
+library(Matrix)
+
+source("/home/ecb86/Desktop/R_tools/ECLIPSE.R")
+source("/home/ecb86/Desktop/R_tools/VDJdive_ECLIPSE_paperFunctions.R")
+```
+
+```{r}
+############################################################################
+###                    Figure 5 A-C Pre-Processing                       ###
+############################################################################
+cd8so <- readRDS("/home/ecb86/project/david/sc_datasets/oliveira_melanoma/cd8/tils.CD8.R0.6.harmonized.20200422.rds")
+cd8so <- UpdateSeuratObject(cd8so)
+DimPlot(cd8so, label = TRUE)
+
+cd8so$seurat_barcode <- rownames(cd8so@meta.data)
+# cd8so$patient holds the patient info
+
+
+dirs <- list.dirs("/home/ecb86/project/david/sc_datasets/oliveira_melanoma/TCRdata")
+dirs <- dirs[-1]
+
+matching <- data.frame("index" = 1:16, "dirs" = str_extract(dirs, "Pt.*$"))
+
+### This shows matching --> table(cd8s$sample, cd8s$patient)
+matching$sample <- c("TIL_pre_CD45pos_CD3pos-2", # Pt11 (PtC)_pre_CD45pos_CD3pos_2
+                     "TIL_pre_CD45pos_CD3pos-3", # Pt11 (PtC)_pre_CD45pos_CD3pos_3
+                     "TIL_pre_CD45pos_CD3pos-1", # Pt11 (PtC)_til_pre_CD45pos_CD3pos_1
+                     "TIL_rel-1", # Pt11 (PtC)_til_rel_1
+                     "TIL_rel-2", # Pt11 (PtC)_til_rel_2
+                     "TIL_CD45pos_CD3pos-1.rds", # Pt15 (PtD)TIL_CD45pos_CD3pos-1
+                     "TIL_CD45pos_CD3pos-2.rds", # Pt15 (PtD)TIL_CD45pos_CD3pos-2
+                     "TIL_CD45pos_CD3pos-3.rds", # Pt15 (PtD)TIL_CD45pos_CD3pos-3
+                     "TIL_CD45pos_CD3pos-4.rds", # Pt15 (PtD)TIL_CD45pos_CD3pos-4
+                     "TIL_CD45pos_CD3pos-1", # Pt2 (PtA)TIL_CD45pos_CD3pos-1
+                     "TIL_CD45pos_CD3pos-2", # Pt2 (PtA)TIL_CD45pos_CD3pos-2
+                     "TIL_CD45pos_CD3pos-3", # Pt2 (PtA)TIL_CD45pos_CD3pos-3
+                     "TIL_sel_1", # Pt6 (PtB)TIL_sel_1
+                     "TIL_sel_2", # Pt6 (PtB)TIL_sel_2
+                     "TIL_sel_3", # Pt6 (PtB)TIL_sel_3
+                     "TIL_sel_4") # Pt6 (PtB)TIL_sel_4
+
+cd8so@meta.data <- cd8so@meta.data %>% left_join(matching, by = "sample")
+
+cd8so@meta.data <- as.data.frame(cd8so@meta.data)
+rownames(cd8so@meta.data) <- cd8so$seurat_barcode
+
+cd8so$raw_barcode <- str_replace(cd8so$seurat_barcode, "^.*_", "")
+cd8so$raw_barcode <- str_replace(cd8so$raw_barcode, "-.*$", "-1")
+
+ocd8s <- ECLIPSE(folders = dirs, file_type = "all", seurat_object = cd8so, batch = "index", donor = "patient", group = "patient", original_barcode = "raw_barcode", write_folder = "/home/ecb86/Desktop/braun/ECLIPSE/braun_cCell/tcr_temp", mode = "standard")
+
+ocd8s <- tcrDoubletDetect(ocd8s)
+```
+
+```{r}
+############################################################################
+###                             Figure 5A                                ###
+############################################################################
+
+screp <- scRep(cd8so, folders = dirs, batch = "index", group = "patient", original_barcode = "raw_barcode", mode = "standard")
+noNaFilterMulti <- scRep(cd8so, folders = dirs, batch = "index", group = "patient", original_barcode = "raw_barcode", mode = "noNaFilterMulti")
+noNaNoMulti <- scRep(cd8so, folders = dirs, batch = "index", group = "patient", original_barcode = "raw_barcode", mode = "noNaNoMulti")  
+
+tcre_div <- clonalDiversity(ocd8s, group.by = "patient", cloneCall = "aa", exportTable = TRUE) %>% mutate(class = "tcrEclipse")
+scr_div <- clonalDiversity(screp, group.by = "patient", cloneCall = "aa", exportTable = TRUE) %>% mutate(class = "scRepertoire")
+scr2_div <- clonalDiversity(noNaFilterMulti, group.by = "patient", cloneCall = "aa", exportTable = TRUE) %>% mutate(class = "noNaFilterMulti")
+scr3_div <- clonalDiversity(noNaNoMulti, group.by = "patient", cloneCall = "aa", exportTable = TRUE) %>% mutate(class = "noNaNoMulti")
+
+div <- rbind(tcre_div, scr_div, scr2_div, scr3_div)
+
+div <- div %>% filter(patient != "p6")
+
+div$class <- factor(div$class, levels = c("tcrEclipse", "scRepertoire", "noNaFilterMulti", "noNaNoMulti"))
+
+div  %>% ggplot(aes(x = class, y = shannon)) + 
+         geom_boxplot(aes(fill = class), outlier.size = -1, width = 0.4, linewidth = 0.9) +
+         geom_path(aes(group = patient), alpha = 0.3) + 
+         geom_point(color = "grey40", fill = "white", shape = 21, stroke = 1, size = 2) +
+         theme_classic() + xlab("") + ylab("Shannon Index") + 
+         theme(axis.text = element_text(size = 16, face = "bold"), axis.title = element_text(size = 20, face = "bold"), legend.position = "none",
+               axis.title.x = element_text(vjust = -1), plot.title = element_text(hjust = 0.5, face = "bold", size = 24),
+               axis.text.x = element_blank(), axis.ticks.x = element_blank()) +
+         ggtitle("Melanoma CD8+ T cells") +
+         scale_x_discrete(limits = c("tcrEclipse", "scRepertoire", "noNaFilterMulti", "noNaNoMulti")) +
+         scale_fill_manual(values = c("paleturquoise3", "darkorange2", "darkolivegreen3", "hotpink2"))
+
+ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/5a.png", width = 1800, height = 1400, units = "px")
+```
+
+```{r}
+############################################################################
+###                             Figure 5B                                ###
+############################################################################
+
+
+tcre <- ocd8s@meta.data %>% select(barcode, patient, CTaa, cloneCallSource) %>% mutate(type = "tcrEclipse")
+scr <- screp@meta.data %>% select(barcode, patient, CTaa) %>% mutate(cloneCallSource = "scRepertoire") %>% mutate(type = "scRepertoire")
+scr2 <- noNaFilterMulti@meta.data %>% select(barcode, patient, CTaa) %>% mutate(cloneCallSource = "scRepertoire") %>% mutate(type = "noNaFilterMulti")
+scr3 <- noNaNoMulti@meta.data %>% select(barcode, patient, CTaa) %>% mutate(cloneCallSource = "scRepertoire") %>% mutate(type = "noNaNoMulti")
+
+combo <- rbind(tcre, scr, scr2, scr3)
+
+combo2 <- combo %>% group_by(patient, type) %>% mutate(totalCount = n()) %>% ungroup() %>%
+                    group_by(patient, type, CTaa) %>% summarise(count = n(),
+                                                              pct = 100 * n() / first(totalCount),
+                                                              total = first(totalCount))
+
+combo2 <- combo2 %>% filter(!is.na(CTaa)) %>% arrange(desc(count)) %>% group_by(patient, type) %>% filter(row_number() <= 30) %>% ungroup()
+
+combo3 <- combo2 %>% group_by(patient, type) %>% summarise(mn = mean(count)) %>% ungroup()
+
+combo3$type <- factor(combo3$type, levels = c("tcrEclipse", "scRepertoire", "noNaFilterMulti", "noNaNoMulti"))
+combo3 <- combo3 %>% group_by(patient) %>% mutate(pct = (100 * mn / mn[which(type == "noNaNoMulti")]) - 100)
+combo3 <- combo3 %>% arrange(type)
+
+combo3 <- combo3 %>% filter(patient != "p6")
+
+combo3 %>% ggplot(aes(x = type, y = pct)) + 
+           geom_boxplot(aes(fill = type), outlier.size = -1, width = 0.4, linewidth = 0.9) +
+           geom_path(aes(group = patient), alpha = 0.3) + 
+           geom_point(color = "grey40", fill = "white", shape = 21, stroke = 1, size = 2) +
+           theme_classic() + xlab("") + ylab("% Change in Mean Size of\n Top 30 Clones") + 
+           theme(axis.text = element_text(size = 16, face = "bold"), axis.title = element_text(size = 20, face = "bold"), legend.position = "none",
+                 axis.title.x = element_text(vjust = -1), plot.title = element_text(hjust = 0.5, face = "bold", size = 24),
+                 axis.text.x = element_blank(), axis.ticks.x = element_blank()) +
+           ggtitle("Melanoma CD8+ T cells") +
+           scale_x_discrete(limits = c("tcrEclipse", "scRepertoire", "noNaFilterMulti", "noNaNoMulti")) +
+           scale_fill_manual(values = c("paleturquoise3", "darkorange2", "darkolivegreen3", "hotpink2"))
+
+ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/5b.png", width = 1800, height = 1400, units = "px")
+```
+
+```{r}
+############################################################################
+###                             Figure 5C                                ###
+############################################################################
+
+combo <- combo %>% mutate(missing = case_when(
+                                               is.na(CTaa) ~ "No TCR\nDetected",
+                                              !is.na(CTaa) ~ "Not Missing"))
+combo4 <- combo %>% group_by(patient, type) %>% mutate(totalCount = n()) %>% ungroup() %>%
+                    group_by(patient, type, missing) %>% summarise(count = n(),
+                                                                 total = first(totalCount),
+                                                                 pct = 100 * n() / first(totalCount))
+combo4 <- combo4 %>% filter(patient != "p6")
+
+combo4$type <- factor(combo4$type, levels = c("tcrEclipse", "scRepertoire", "noNaFilterMulti", "noNaNoMulti"))
+combo4 <- combo4 %>% arrange(type)
+
+combo4 <- combo4 %>% filter(missing == "No TCR\nDetected")
+
+combo4 %>% ggplot(aes(x = type, y = pct)) + 
+           geom_boxplot(aes(fill = type), outlier.size = -1, width = 0.4, linewidth = 0.9) +
+           geom_path(aes(group = patient), alpha = 0.3) + 
+           geom_point(color = "grey40", fill = "white", shape = 21, stroke = 1, size = 2) +
+           theme_classic() + xlab("") + ylab("% of Cells\nWith Missing TCR Data") + 
+           theme(axis.text = element_text(size = 16, face = "bold"), axis.title = element_text(size = 20, face = "bold"), legend.position = "none",
+                 axis.title.x = element_text(vjust = -1), plot.title = element_text(hjust = 0.5, face = "bold", size = 24),
+                 axis.text.x = element_blank(), axis.ticks.x = element_blank()) +
+           ggtitle("Melanoma CD8+ T cells") +
+           scale_x_discrete(limits = c("tcrEclipse", "scRepertoire", "noNaFilterMulti", "noNaNoMulti")) +
+           scale_fill_manual(values = c("paleturquoise3", "darkorange2", "darkolivegreen3", "hotpink2"))
+
+ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/5c.png", width = 1800, height = 1400, units = "px")
+```
+
+```{r}
+############################################################################
+###                    Figure 5D-F Pre-Processing                        ###
+############################################################################
+cd4s <- readRDS("/home/ecb86/project/david/sc_datasets/oliveira_melanoma/cd4/tils.CD4.harmonized.20200514.rds")
+cd4s <- UpdateSeuratObject(cd4s)
+DimPlot(cd4s, label = TRUE)
+
+cd4s$seurat_barcode <- rownames(cd4s@meta.data)
+# cd8s$patient holds the patient info
+
+
+dirs <- list.dirs("/home/ecb86/project/david/sc_datasets/oliveira_melanoma/TCRdata")
+dirs <- dirs[-1]
+
+matching <- data.frame("index" = 1:16, "dirs" = str_extract(dirs, "Pt.*$"))
+
+### This shows matching --> table(cd8s$sample, cd8s$patient)
+matching$sample <- c("TIL_pre_CD45pos_CD3pos-2", # Pt11 (PtC)_pre_CD45pos_CD3pos_2
+                     "TIL_pre_CD45pos_CD3pos-3", # Pt11 (PtC)_pre_CD45pos_CD3pos_3
+                     "TIL_pre_CD45pos_CD3pos-1", # Pt11 (PtC)_til_pre_CD45pos_CD3pos_1
+                     "TIL_rel-1", # Pt11 (PtC)_til_rel_1
+                     "TIL_rel-2", # Pt11 (PtC)_til_rel_2
+                     "TIL_CD45pos_CD3pos-1.rds", # Pt15 (PtD)TIL_CD45pos_CD3pos-1
+                     "TIL_CD45pos_CD3pos-2.rds", # Pt15 (PtD)TIL_CD45pos_CD3pos-2
+                     "TIL_CD45pos_CD3pos-3.rds", # Pt15 (PtD)TIL_CD45pos_CD3pos-3
+                     "TIL_CD45pos_CD3pos-4.rds", # Pt15 (PtD)TIL_CD45pos_CD3pos-4
+                     "TIL_CD45pos_CD3pos-1", # Pt2 (PtA)TIL_CD45pos_CD3pos-1
+                     "TIL_CD45pos_CD3pos-2", # Pt2 (PtA)TIL_CD45pos_CD3pos-2
+                     "TIL_CD45pos_CD3pos-3", # Pt2 (PtA)TIL_CD45pos_CD3pos-3
+                     "TIL_sel_1", # Pt6 (PtB)TIL_sel_1
+                     "TIL_sel_2", # Pt6 (PtB)TIL_sel_2
+                     "TIL_sel_3", # Pt6 (PtB)TIL_sel_3
+                     "TIL_sel_4") # Pt6 (PtB)TIL_sel_4
+
+cd4s@meta.data <- cd4s@meta.data %>% left_join(matching, by = "sample")
+
+cd4s@meta.data <- as.data.frame(cd4s@meta.data)
+rownames(cd4s@meta.data) <- cd4s$seurat_barcode
+
+cd4s$raw_barcode <- str_replace(cd4s$seurat_barcode, "^.*_", "")
+cd4s$raw_barcode <- str_replace(cd4s$raw_barcode, "-.*$", "-1")
+
+ocd4s <- ECLIPSE(folders = dirs, file_type = "all", seurat_object = cd4s, batch = "index", donor = "patient", group = "patient", original_barcode = "raw_barcode", write_folder = "/home/ecb86/Desktop/braun/ECLIPSE/braun_cCell/tcr_temp", mode = "standard")
+
+ocd4s <- tcrDoubletDetect(ocd4s)
+```
+
+
+```{r}
+############################################################################
+###                             Figure 5D                                ###
+############################################################################
+
+screp <- scRep(cd4s, folders = dirs, batch = "index", group = "patient", original_barcode = "raw_barcode", mode = "standard")
+noNaFilterMulti <- scRep(cd4s, folders = dirs, batch = "index", group = "patient", original_barcode = "raw_barcode", mode = "noNaFilterMulti")
+noNaNoMulti <- scRep(cd4s, folders = dirs, batch = "index", group = "patient", original_barcode = "raw_barcode", mode = "noNaNoMulti")          
+
+tcre_div <- clonalDiversity(ocd4s, group.by = "patient", cloneCall = "aa", exportTable = TRUE) %>% mutate(class = "tcrEclipse")
+scr_div <- clonalDiversity(screp, group.by = "patient", cloneCall = "aa", exportTable = TRUE) %>% mutate(class = "scRepertoire")
+scr2_div <- clonalDiversity(noNaFilterMulti, group.by = "patient", cloneCall = "aa", exportTable = TRUE) %>% mutate(class = "noNaFilterMulti")
+scr3_div <- clonalDiversity(noNaNoMulti, group.by = "patient", cloneCall = "aa", exportTable = TRUE) %>% mutate(class = "noNaNoMulti")
+
+div <- rbind(tcre_div, scr_div, scr2_div, scr3_div)
+
+div <- div %>% filter(patient != "p6")
+
+div$class <- factor(div$class, levels = c("tcrEclipse", "scRepertoire", "noNaFilterMulti", "noNaNoMulti"))
+
+div  %>% ggplot(aes(x = class, y = shannon)) + 
+         geom_boxplot(aes(fill = class), outlier.size = -1, width = 0.4, linewidth = 0.9) +
+         geom_path(aes(group = patient), alpha = 0.3) + 
+         geom_point(color = "grey40", fill = "white", shape = 21, stroke = 1, size = 2) +
+         theme_classic() + xlab("") + ylab("Shannon Index") + 
+         theme(axis.text = element_text(size = 16, face = "bold"), axis.title = element_text(size = 20, face = "bold"), legend.position = "none",
+               axis.title.x = element_text(vjust = -1), plot.title = element_text(hjust = 0.5, face = "bold", size = 24),
+               axis.text.x = element_blank(), axis.ticks.x = element_blank()) +
+         ggtitle("Melanoma CD4+ T cells") +
+         scale_x_discrete(limits = c("tcrEclipse", "scRepertoire", "noNaFilterMulti", "noNaNoMulti")) +
+         scale_fill_manual(values = c("paleturquoise3", "darkorange2", "darkolivegreen3", "hotpink2"))
+
+ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/5d.png", width = 1800, height = 1400, units = "px")
+```
+
+```{r}
+############################################################################
+###                             Figure 5E                                ###
+############################################################################
+
+tcre <- ocd4s@meta.data %>% select(barcode, patient, CTaa, cloneCallSource) %>% mutate(type = "tcrEclipse")
+scr <- screp@meta.data %>% select(barcode, patient, CTaa) %>% mutate(cloneCallSource = "scRepertoire") %>% mutate(type = "scRepertoire")
+scr2 <- noNaFilterMulti@meta.data %>% select(barcode, patient, CTaa) %>% mutate(cloneCallSource = "scRepertoire") %>% mutate(type = "noNaFilterMulti")
+scr3 <- noNaNoMulti@meta.data %>% select(barcode, patient, CTaa) %>% mutate(cloneCallSource = "scRepertoire") %>% mutate(type = "noNaNoMulti")
+
+combo <- rbind(tcre, scr, scr2, scr3)
+
+combo2 <- combo %>% group_by(patient, type) %>% mutate(totalCount = n()) %>% ungroup() %>%
+                    group_by(patient, type, CTaa) %>% summarise(count = n(),
+                                                              pct = 100 * n() / first(totalCount),
+                                                              total = first(totalCount))
+
+combo2 <- combo2 %>% filter(!is.na(CTaa)) %>% arrange(desc(count)) %>% group_by(patient, type) %>% filter(row_number() <= 30) %>% ungroup()
+
+combo3 <- combo2 %>% group_by(patient, type) %>% summarise(mn = mean(count)) %>% ungroup()
+
+combo3$type <- factor(combo3$type, levels = c("tcrEclipse", "scRepertoire", "noNaFilterMulti", "noNaNoMulti"))
+combo3 <- combo3 %>% group_by(patient) %>% mutate(pct = (100 * mn / mn[which(type == "noNaNoMulti")]) - 100)
+combo3 <- combo3 %>% arrange(type)
+
+combo3 <- combo3 %>% filter(patient != "p6")
+
+combo3 %>% ggplot(aes(x = type, y = pct)) + 
+           geom_boxplot(aes(fill = type), outlier.size = -1, width = 0.4, linewidth = 0.9) +
+           geom_path(aes(group = patient), alpha = 0.3) + 
+           geom_point(color = "grey40", fill = "white", shape = 21, stroke = 1, size = 2) +
+           theme_classic() + xlab("") + ylab("% Change in Mean Size of\n Top 30 Clones") + 
+           theme(axis.text = element_text(size = 16, face = "bold"), axis.title = element_text(size = 20, face = "bold"), legend.position = "none",
+                 axis.title.x = element_text(vjust = -1), plot.title = element_text(hjust = 0.5, face = "bold", size = 24),
+                 axis.text.x = element_blank(), axis.ticks.x = element_blank()) +
+           ggtitle("Melanoma CD4+ T cells") +
+           scale_x_discrete(limits = c("tcrEclipse", "scRepertoire", "noNaFilterMulti", "noNaNoMulti")) +
+           scale_fill_manual(values = c("paleturquoise3", "darkorange2", "darkolivegreen3", "hotpink2"))
+
+ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/5e.png", width = 1800, height = 1400, units = "px")
+```
+
+```{r}
+############################################################################
+###                             Figure 5F                                ###
+############################################################################
+combo <- combo %>% mutate(missing = case_when(
+                                               is.na(CTaa) ~ "No TCR\nDetected",
+                                              !is.na(CTaa) ~ "Not Missing"))
+combo4 <- combo %>% group_by(patient, type) %>% mutate(totalCount = n()) %>% ungroup() %>%
+                    group_by(patient, type, missing) %>% summarise(count = n(),
+                                                                 total = first(totalCount),
+                                                                 pct = 100 * n() / first(totalCount))
+combo4 <- combo4 %>% filter(patient != "p6")
+
+
+combo4$type <- factor(combo4$type, levels = c("tcrEclipse", "scRepertoire", "noNaFilterMulti", "noNaNoMulti"))
+combo4 <- combo4 %>% arrange(type)
+combo4 <- combo4 %>% filter(missing == "No TCR\nDetected")
+
+
+combo4 %>% ggplot(aes(x = type, y = pct)) + 
+           geom_boxplot(aes(fill = type), outlier.size = -1, width = 0.4, linewidth = 0.9) +
+           geom_path(aes(group = patient), alpha = 0.3) + 
+           geom_point(color = "grey40", fill = "white", shape = 21, stroke = 1, size = 2) +
+           theme_classic() + xlab("") + ylab("% of Cells\nWith Missing TCR Data") + 
+           theme(axis.text = element_text(size = 16, face = "bold"), axis.title = element_text(size = 20, face = "bold"), legend.position = "none",
+                 axis.title.x = element_text(vjust = -1), plot.title = element_text(hjust = 0.5, face = "bold", size = 24),
+                 axis.text.x = element_blank(), axis.ticks.x = element_blank()) +
+           ggtitle("Melanoma CD4+ T cells") +
+           scale_x_discrete(limits = c("tcrEclipse", "scRepertoire", "noNaFilterMulti", "noNaNoMulti")) +
+           scale_fill_manual(values = c("paleturquoise3", "darkorange2", "darkolivegreen3", "hotpink2"))
+
+ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/5f.png", width = 1800, height = 1400, units = "px")
+```
+
+```{r}
+############################################################################
+###                    Figure 5 G-I Pre-Processing.                      ###
+############################################################################
+
+dirs <- list.files("/home/ecb86/project/david/sc_datasets/th17_covid", full.names = TRUE)
+samples <- str_extract(dirs, "Bac.*|Sar.*")
+
+ps <- list()
+tcr_dirs <- c()
+
+for (i in 1:length(dirs)) {
+  
+  print(i)
+  
+  matrix_dir <- list.files(dirs[i], pattern = "matrix", full.names = TRUE)
+  matrix <- readMM(matrix_dir[1])
+
+  barcode_dir <- list.files(dirs[i], pattern = "barcodes", full.names = TRUE)
+  barcodes <- read_tsv(barcode_dir[1], col_names = FALSE)
+  barcodes <- barcodes$X1
+
+  features_dir <- list.files(dirs[i], pattern = "features", full.names = TRUE)
+  features <- read_tsv(features_dir[1], col_names = FALSE)
+  features <- features$X1 ### Note: This has both ENSG and names. I'm taking ENSG since I can't have duplicates
+  
+  tcr_dir <- list.files(dirs[i], pattern = "contig", full.names = TRUE)
+  tcr_dirs[i] <- tcr_dir[1]
+  
+  ps[[i]] <- as.data.frame(matrix)
+  colnames(ps[[i]]) <- paste(samples[i], barcodes, sep = "_")
+  rownames(ps[[i]]) <- features
+  
+  if (length(matrix_dir) > 1 | length(barcode_dir) > 1 | length(features_dir) > 1 | length(tcr_dir) > 1) {
+    message(paste("Warning, multiple files found"))
+  }
+  
+}
+
+p <- bind_cols(ps)
+rm(ps)
+
+tumor <- CreateSeuratObject(p)
+rm(p, matrix)
+VlnPlot(tumor, "nCount_RNA", pt.size = 0)
+
+tumor@meta.data <- tumor@meta.data %>% separate(orig.ident, into = c("condition", "sample"), sep = 3, remove = FALSE)
+tumor$tissue <- str_extract(tumor$sample, "B|L")
+tumor$donor <- as.character(str_replace(tumor$sample, "B|L", ""))
+tumor$donor <- paste("D", tumor$donor, sep = "")
+tumor$Barcode <- rownames(tumor@meta.data)
+
+matching <- data.frame("index" = c(1:22), "orig.ident" = samples)
+tumor@meta.data <- tumor@meta.data %>% left_join(matching, by = "orig.ident")
+
+tumor@meta.data <- as.data.frame(tumor@meta.data)
+rownames(tumor@meta.data) <- tumor$Barcode
+
+tumor$original_barcode <- str_replace(tumor$Barcode, ".*_", "")
+
+tumor <- NormalizeData(tumor)
+tumor <- FindVariableFeatures(tumor)
+tumor <- ScaleData(tumor, features = rownames(tumor))
+
+tumor <- RunPCA(tumor, features = VariableFeatures(object = tumor))
+  
+ElbowPlot(tumor, ndims = 50)
+
+tumor <- FindNeighbors(tumor, dims = 1:15)
+tumor <- FindClusters(tumor, resolution = 0.3)
+tumor <- RunUMAP(tumor, dims = 1:15)
+  
+DimPlot(tumor, label = TRUE)
+
+tumor <- JoinLayers(tumor)
+
+th17 <- ECLIPSE(file = "manual", file_paths = tcr_dirs, seurat_object = tumor, batch = "index", donor = "donor", group = "donor", original_barcode = "original_barcode", write_folder = "/home/ecb86/Desktop/braun/tcrEclipse/th17_covid", mode = "standard", format = "none")
+
+#th17 <- readRDS("/home/ecb86/project/david/tcrEclipse/paper_seurat_objects/th17_covid.rds")
+
+DimPlot(th17, group.by = "cloneCallSource")
+DimPlot(th17, label = TRUE)
+DotPlot(th17, features = c("ENSG00000198851", #CD3E
+                           "ENSG00000167286", #CD3D
+                           "ENSG00000010610", #CD4
+                           "ENSG00000153563", #CD8A,
+                           "ENSG00000156738", #MS4A1
+                           "ENSG00000136869", #TLR4
+                           "ENSG00000170458", #CD14,
+                           "ENSG00000105374")) + #NKG7
+      scale_x_discrete(labels = c("CD3E", "CD3D", "CD4", "CD8A", "MS4A1", "TLR4", "CD14", "NKG7"))
+### Clusters 0-9 and 13/14 are T cells
+
+tcells <- subset(th17, subset = RNA_snn_res.0.3 %in% c("10", "11", "12", "15", "16") == FALSE)
+
+tcells <- tcrDoubletDetect(tcells)
+
+tumor$keep <- rownames(tumor@meta.data) %in% rownames(tcells@meta.data)
+tumor <- subset(tumor, subset = keep == TRUE)
+```
+
+```{r}
+############################################################################
+###                             Figure 5G                                ###
+############################################################################
+
+screp <- scRep(tumor, folders = dirs, batch = "index", group = "donor", original_barcode = "original_barcode", mode = "standard", file = "manual", file_paths = tcr_dirs)
+noNaFilterMulti <- scRep(tumor, folders = dirs, batch = "index", group = "donor", original_barcode = "original_barcode", mode = "noNaFilterMulti", file = "manual", file_paths = tcr_dirs)
+noNaNoMulti <- scRep(tumor, folders = dirs, batch = "index", group = "donor", original_barcode = "original_barcode", mode = "noNaNoMulti", file = "manual", file_paths = tcr_dirs)
+
+tcre_div <- clonalDiversity(tcells, group.by = "donor", cloneCall = "aa", exportTable = TRUE) %>% mutate(class = "tcrEclipse")
+scr_div <- clonalDiversity(screp, group.by = "donor", cloneCall = "aa", exportTable = TRUE) %>% mutate(class = "scRepertoire")
+scr2_div <- clonalDiversity(noNaFilterMulti, group.by = "donor", cloneCall = "aa", exportTable = TRUE) %>% mutate(class = "noNaFilterMulti")
+scr3_div <- clonalDiversity(noNaNoMulti, group.by = "donor", cloneCall = "aa", exportTable = TRUE) %>% mutate(class = "noNaNoMulti")
+
+div <- rbind(tcre_div, scr_div, scr2_div, scr3_div)
+
+
+div$class <- factor(div$class, levels = c("tcrEclipse", "scRepertoire", "noNaFilterMulti", "noNaNoMulti"))
+div2 <- div %>% ungroup() %>% 
+                    select(shannon, class, donor)  %>%
+                    pivot_wider(
+                                names_from = class,
+                                values_from = shannon)
+
+results <- runPairedTests(div2, groups = c("tcrEclipse", "noNaNoMulti", "noNaFilterMulti", "scRepertoire"), adjustment_method = "fdr", runPaired = TRUE)
+results$y.position <- c(8, 8.2, 8.4, 8.4, 8.6, 8.8)
+
+### 600x500
+div %>% ggplot(aes(x = class, y = shannon)) + geom_boxplot(aes(fill = class), outlier.size = -1) +
+                                              geom_path(aes(group = donor), alpha = 0.3) +
+                                              geom_point() + 
+                                              theme_classic() + xlab("") + ylab("Shannon Index") +
+                                              stat_pvalue_manual(results, tip.length = 0, side = 4, label = "p.adj2") +
+                                              theme(axis.text = element_text(size = 14),
+                                                    axis.title = element_text(size = 20),
+                                                    legend.position = "none")  +
+                                              scale_x_discrete(limits = c("tcrEclipse", "scRepertoire", "noNaFilterMulti", "noNaNoMulti"),
+                                                               labels  = c("tcrEclipse", "Allow Missing\nAllow Multi", "No Missing\nAdjust Multi", "No Missing\nNo Multi"))
+
+div  %>% ggplot(aes(x = class, y = shannon)) + 
+         geom_boxplot(aes(fill = class), outlier.size = -1, width = 0.4, linewidth = 0.9) +
+         geom_path(aes(group = donor), alpha = 0.3) + 
+         geom_point(color = "grey40", fill = "white", shape = 21, stroke = 1, size = 2) +
+         theme_classic() + xlab("") + ylab("Shannon Index") + ggtitle("Infection CD4+ & CD8+ T cells") +
+         stat_pvalue_manual(results, tip.length = 0, side = 4, label = "p.adj2") +
+         theme(axis.text = element_text(size = 16, face = "bold"), axis.title = element_text(size = 20, face = "bold"), legend.position = "none",
+               axis.title.x = element_text(vjust = -1), plot.title = element_text(hjust = 0.5, face = "bold", size = 24),
+               axis.text.x = element_blank(), axis.ticks.x = element_blank()) +
+         scale_x_discrete(limits = c("tcrEclipse", "scRepertoire", "noNaFilterMulti", "noNaNoMulti")) +
+         scale_fill_manual(values = c("paleturquoise3", "darkorange2", "darkolivegreen3", "hotpink2"))
+
+
+ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/5g.png", width = 1800, height = 1400, units = "px")
+```
+
+
+```{r}
+############################################################################
+###                             Figure 5H                                ###
+############################################################################
+
+tcre <- tcells@meta.data %>% select(barcode, donor, CTaa, cloneCallSource) %>% mutate(type = "tcrEclipse")
+scr <- screp@meta.data %>% select(barcode, donor, CTaa) %>% mutate(cloneCallSource = "scRepertoire") %>% mutate(type = "scRepertoire")
+scr2 <- noNaFilterMulti@meta.data %>% select(barcode, donor, CTaa) %>% mutate(cloneCallSource = "scRepertoire") %>% mutate(type = "noNaFilterMulti")
+scr3 <- noNaNoMulti@meta.data %>% select(barcode, donor, CTaa) %>% mutate(cloneCallSource = "scRepertoire") %>% mutate(type = "noNaNoMulti")
+
+combo <- rbind(tcre, scr, scr2, scr3)
+
+combo2 <- combo %>% group_by(donor, type) %>% mutate(totalCount = n()) %>% ungroup() %>%
+                    group_by(donor, type, CTaa) %>% summarise(count = n(),
+                                                              pct = 100 * n() / first(totalCount),
+                                                              total = first(totalCount))
+
+combo2 <- combo2 %>% filter(!is.na(CTaa)) %>% arrange(desc(count)) %>% group_by(donor, type) %>% filter(row_number() <= 30) %>% ungroup()
+
+combo3 <- combo2 %>% group_by(donor, type) %>% summarise(mn = mean(count)) %>% ungroup()
+
+combo3$type <- factor(combo3$type, levels = c("tcrEclipse", "scRepertoire", "noNaFilterMulti", "noNaNoMulti"))
+combo3 <- combo3 %>% group_by(donor) %>% mutate(pct = (100 * mn / mn[which(type == "noNaNoMulti")]) - 100)
+combo3 <- combo3 %>% arrange(type)
+
+combo4 <- combo3 %>% ungroup() %>% 
+                    select(type, pct, donor)  %>%
+                    pivot_wider(
+                                names_from = type,
+                                values_from = pct)
+
+results <- runPairedTests(combo4, groups = c("tcrEclipse", "noNaNoMulti", "noNaFilterMulti", "scRepertoire"), adjustment_method = "fdr", runPaired = TRUE)
+results$y.position <- c(160, 168, 176, 176, 184, 192)
+
+combo3 %>% ggplot(aes(x = type, y = pct)) + 
+           geom_boxplot(aes(fill = type), outlier.size = -1, width = 0.4, linewidth = 0.9) +
+           geom_path(aes(group = donor), alpha = 0.3) + 
+           geom_point(color = "grey40", fill = "white", shape = 21, stroke = 1, size = 2) +
+           theme_classic() + xlab("") + ylab("% Change in Mean Size of\n Top 30 Clones") + ggtitle("Infection CD4+ & CD8+ T cells") +
+           stat_pvalue_manual(results, tip.length = 0, side = 4, label = "p.adj2") +
+           theme(axis.text = element_text(size = 16, face = "bold"), axis.title = element_text(size = 20, face = "bold"), legend.position = "none",
+                 axis.title.x = element_text(vjust = -1), plot.title = element_text(hjust = 0.5, face = "bold", size = 24),
+                 axis.text.x = element_blank(), axis.ticks.x = element_blank()) +
+           scale_x_discrete(limits = c("tcrEclipse", "scRepertoire", "noNaFilterMulti", "noNaNoMulti")) +
+           scale_fill_manual(values = c("paleturquoise3", "darkorange2", "darkolivegreen3", "hotpink2"))
+
+ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/5h.png", width = 1800, height = 1400, units = "px")
+```
+
+
+```{r}
+############################################################################
+###                             Figure 5I                                ###
+############################################################################
+
+combo <- combo %>% mutate(missing = case_when(
+                                               is.na(CTaa) ~ "No TCR\nDetected",
+                                              !is.na(CTaa) ~ "Not Missing"))
+combo4 <- combo %>% group_by(donor, type) %>% mutate(totalCount = n()) %>% ungroup() %>%
+                    group_by(donor, type, missing) %>% summarise(count = n(),
+                                                                 total = first(totalCount),
+                                                                 pct = 100 * n() / first(totalCount))
+
+combo5 <- combo4 %>% ungroup() %>% filter(missing == "No TCR\nDetected") %>% 
+                    select(donor, type, pct) %>%
+                    pivot_wider(
+                                names_from = type,
+                                values_from = pct)
+                    
+results <- runPairedTests(combo5, groups = c("tcrEclipse", "noNaNoMulti", "noNaFilterMulti", "scRepertoire"), adjustment_method = "fdr", runPaired = TRUE)
+results$y.position <- c(70, 75, 80, 80, 85, 90)
+
+combo4$type <- factor(combo4$type, levels = c("tcrEclipse", "scRepertoire", "noNaFilterMulti", "noNaNoMulti"))
+combo4 <- combo4 %>% arrange(type)
+
+combo4 <- combo4 %>% filter(missing == "No TCR\nDetected")
+
+combo4 %>% ggplot(aes(x = type, y = pct)) + 
+           geom_boxplot(aes(fill = type), outlier.size = -1, width = 0.4, linewidth = 0.9) +
+           geom_path(aes(group = donor), alpha = 0.3) + 
+           geom_point(color = "grey40", fill = "white", shape = 21, stroke = 1, size = 2) +
+           stat_pvalue_manual(results, tip.length = 0, side = 4, label = "p.adj2") +  ggtitle("Infection CD4+ & CD8+ T cells") +
+           theme_classic() + xlab("") + ylab("% of Cells\nWith Missing TCR Data") + 
+           theme(axis.text = element_text(size = 16, face = "bold"), axis.title = element_text(size = 20, face = "bold"), legend.position = "none",
+                 axis.title.x = element_text(vjust = -1), plot.title = element_text(hjust = 0.5, face = "bold", size = 24),
+                 axis.text.x = element_blank(), axis.ticks.x = element_blank()) +
+           scale_x_discrete(limits = c("tcrEclipse", "scRepertoire", "noNaFilterMulti", "noNaNoMulti")) +
+           scale_fill_manual(values = c("paleturquoise3", "darkorange2", "darkolivegreen3", "hotpink2"))
+
+ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/5i.png", width = 1800, height = 1400, units = "px")
+```
