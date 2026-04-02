@@ -21,8 +21,8 @@ library(ggsci)
 library(RColorBrewer)
 library(viridis)
 
-source("/home/ecb86/Desktop/R_tools/ECLIPSE.R")
-source("/home/ecb86/Desktop/R_tools/VDJdive_ECLIPSE_paperFunctions.R")
+source("/home/Desktop/R_tools/ECLIPSE.R")
+source("/home/Desktop/R_tools/VDJdive_ECLIPSE_paperFunctions.R")
 set.seed(16)
 ```
 
@@ -31,7 +31,7 @@ set.seed(16)
 ###                         Pre-Processing                               ###
 ############################################################################
 
-braun <- readRDS("/home/ecb86/Desktop/braun/rotation/Braun_cancer_cell/scRCC_SeuratObject.rds")
+braun <- readRDS("/home/Desktop/braun/rotation/Braun_cancer_cell/scRCC_SeuratObject.rds")
 
 braun@meta.data <- braun@meta.data %>% separate(Sample, into = c("donor", "tissue"), remove = FALSE, sep = "_")
 braun@meta.data <- braun@meta.data %>% mutate(tissue = case_when(
@@ -41,11 +41,11 @@ braun@meta.data <- braun@meta.data %>% mutate(tissue = case_when(
 
 cd8 <- subset(braun, subset = ClusterName_TCells %in% c("Treg", "Activated CD4.1", "Activated CD4.2", "CD4 TCM.1", "CD4 TCM.2", "Mito-high T cells", "-1"), invert = TRUE)
 
-dirs <- list.files("/gpfs/gibbs/pi/braun/ecb86/braun_cancerCell/realignment", recursive = TRUE, pattern = "all_contig_annotations\\.csv$", full.names = TRUE)
+dirs <- list.files("/gpfs/gibbs/pi/braun/braun_cancerCell/realignment", recursive = TRUE, pattern = "all_contig_annotations\\.csv$", full.names = TRUE)
 dirs <- dirs[!str_detect(dirs, "SC_VDJ_ASSEMBLER_CS")]
 dirs <- str_replace(dirs, "all.*$", "")
 
-matching <- read.csv("/home/ecb86/project/david/sc_datasets/braun_cancer_cell/braun_matching2.csv")
+matching <- read.csv("/home/project/david/sc_datasets/braun_cancer_cell/braun_matching2.csv")
 matching <- matching %>% filter(Sample != "")
 
 cd8@meta.data <- cd8@meta.data %>% left_join(matching[, 2:3], by = "Sample")
@@ -60,7 +60,7 @@ cd8$ClusterName_TCells[cd8$ClusterName_TCells == "PMCH+ terminally Exhausted CD8
 cd8$ClusterName_TCells[cd8$ClusterName_TCells == "Terminally exhausted CD8.2"] <- "Terminally \n exhausted CD8.2"
 cd8$ClusterName_TCells[cd8$ClusterName_TCells == "Terminally exhausted CD8.3"] <- "Terminally \n exhausted CD8.3"
 
-cd8s <- ECLIPSE(folders = dirs, file_type = "all", seurat_object = cd8, batch = "index", donor = "donor", group = "donor", original_barcode = "Cell_Barcode", write_folder = "/home/ecb86/Desktop/braun/ECLIPSE/braun_cCell/tcr_temp", mode = "standard")
+cd8s <- ECLIPSE(folders = dirs, file_type = "all", seurat_object = cd8, batch = "index", donor = "donor", group = "donor", original_barcode = "Cell_Barcode", write_folder = "/home/Desktop/braun/ECLIPSE/braun_cCell/tcr_temp", mode = "standard")
 
 cd8s <- tcrDoubletDetect(cd8s)
 
@@ -79,7 +79,7 @@ DimPlot(cd8s, group.by = "cloneCallSource", pt.size = 1) +
         theme(legend.text = element_text(face = "bold", size = 14), legend.title = element_text(size = 16, face = "bold")) +
         guides(color = guide_legend(nrow = 3, override.aes = list(size = 5), keywidth = 0.01, title = "Clonal Status"))
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/3a.png", width = 1800, height = 1400, units = "px")
+
 ```
 
 ```{r}
@@ -109,7 +109,7 @@ df2 %>% ggplot(aes(x = reorder(donor, -regularSize), y = percent)) + geom_bar(ae
         scale_fill_locuszoom(limits = c("No TCR\nDetected", "Ambiguous", "Extra TCRα", "Extra TCRβ", "Regular"),
                              labels = c("No TCR\nDetected", "Ambiguous\nChain Count", "Extra TCRα", "Extra TCRβ", "1 TCRα &\n1 TCRβ"))
   
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/3b.png", width = 2000, height = 1400, units = "px")
+
 
 ### Finding medians/max/min for paper
 df2_totals <- df2 %>% group_by(donor) %>% summarise(pct3 = sum(percent[specialClone %in% c("Extra TCRα", "Extra TCRβ")]))
@@ -149,7 +149,7 @@ paired_df <- df3 %>%
                     
 wilcox.test(paired_df$`Extra TCRα`, paired_df$`Extra TCRβ`, paired = TRUE)
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/3c.png", width = 1200, height = 1800, units = "px")
+
 
 
 ### Percentages for the paper
@@ -190,7 +190,7 @@ paired_df %>% ggplot(aes(x = Alpha, y = Beta)) +
               stat_cor(method = "spearman", size = 5, color = "darkviolet", label.y = 9, label.x = 2, fontface = "bold", cor.coef.name = "rho") +
               theme(axis.text = element_text(size = 14, face = "bold"), axis.title = element_text(size = 16, face = "bold"))
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/3d.png", width = 1400, height = 1400, units = "px")
+
 ```
 
 ```{r}
@@ -251,7 +251,7 @@ div %>% ggplot(aes(x = class, y = shannon)) + geom_boxplot(aes(fill = class), ou
                                                     legend.position = "none") +
                                               scale_fill_manual(values = c("paleturquoise3", "darkorange2", "darkolivegreen3", "hotpink2"))
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/3g.png", width = 1800, height = 1400, units = "px")
+
 ```
 
 ```{r}
@@ -280,7 +280,6 @@ div %>% ggplot(aes(x = class, y = inv.simpson)) + geom_boxplot(aes(fill = class)
                                                                labels  = c("tcrEclipse", "Allow Missing\nAllow Multi", "No Missing\nAdjust Multi", "No Missing\nNo Multi")) +
                                               scale_fill_manual(values = c("paleturquoise3", "darkorange2", "darkolivegreen3", "hotpink2"))
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/s1b.png", width = 1800, height = 1400, units = "px")
 
 
 div4 <- div %>% ungroup() %>% 
@@ -305,7 +304,7 @@ div %>% ggplot(aes(x = class, y = norm.entropy)) + geom_boxplot(aes(fill = class
                                                                labels  = c("tcrEclipse", "Allow Missing\nAllow Multi", "No Missing\nAdjust Multi", "No Missing\nNo Multi")) +
                                               scale_fill_manual(values = c("paleturquoise3", "darkorange2", "darkolivegreen3", "hotpink2"))
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/s1c.png", width = 1800, height = 1400, units = "px")
+
 
 
 
@@ -331,7 +330,7 @@ div %>% ggplot(aes(x = class, y = gini.simpson)) + geom_boxplot(aes(fill = class
                                                                labels  = c("tcrEclipse", "Allow Missing\nAllow Multi", "No Missing\nAdjust Multi", "No Missing\nNo Multi")) +
                                               scale_fill_manual(values = c("paleturquoise3", "darkorange2", "darkolivegreen3", "hotpink2"))
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/s1d.png", width = 1800, height = 1400, units = "px")
+
 ```
 
 
@@ -372,7 +371,7 @@ combo3 %>% ggplot(aes(x = type, y = pct)) + geom_boxplot(aes(fill = type), outli
                                                        legend.position = "none")  +
                                                  scale_fill_manual(values = c("paleturquoise3", "darkorange2", "darkolivegreen3", "hotpink2"))
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/3f.png", width = 1800, height = 1400, units = "px")
+
 
 
 ### Stats for paper
@@ -420,7 +419,7 @@ combo6 %>% ggplot(aes(x = type, y = pct)) + geom_boxplot(aes(fill = type), outli
                                                        legend.position = "none")  +
                                                  scale_fill_manual(values = c("paleturquoise3", "darkorange2", "darkolivegreen3", "hotpink2"))
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/s1a.png", width = 1800, height = 1400, units = "px")
+
 
 ```
 
@@ -463,7 +462,7 @@ combo4 %>% ggplot(aes(x = type, y = pct)) + geom_boxplot(aes(fill = type), outli
                                                        legend.position = "none") +
                                                  scale_fill_manual(values = c("paleturquoise3", "darkorange2", "darkolivegreen3", "hotpink2"))
 
-ggsave("/home/ecb86/Desktop/braun/ECLIPSE/paper_realigned/figures/3e.png", width = 1800, height = 1400, units = "px")
+
 
 
 ### Stats for paper
