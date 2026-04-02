@@ -3,6 +3,7 @@ Code used to make figures and for analysis in the VDJdive/ECLIPSE methods manusc
 
 ## Manuscript Authors
 Ethan C Burns, Mercedeh Movassagh, Jill F Lundell, Mingzhi Ye, Zhaochen Ye, Giacomo Oliveira, Rishabh Rout, Miya B Hugaboom, Kelly Street*, David A Braun*
+
 *co-senior/co-corresponding authors
 
 
