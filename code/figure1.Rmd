@@ -1,0 +1,541 @@
+---
+title: "figure1"
+output: html_document
+date: "2025-09-10"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(Seurat)
+library(scRepertoire)
+library(VDJdive)
+library(ggpubr)
+
+source("/home/ecb86/Desktop/R_tools/VDJdive_ECLIPSE_paperFunctions.R")
+```
+
+
+```{r}
+############################################################################
+###                         Pre-Processing                               ###
+############################################################################
+
+braun <- readRDS("/nfs/roberts/pi/pi_db2475/lab_data/sc_assays/braun_cancer_cell_2021/processed/braun_cancer_cell_seurat.rds")
+
+braun@meta.data <- braun@meta.data %>% separate(Sample, into = c("donor", "tissue"), remove = FALSE, sep = "_")
+braun@meta.data <- braun@meta.data %>% mutate(tissue = case_when(
+                                                                 tissue %in% c("T", "T2") ~ "Tumor",
+                                                                 tissue == "N" ~ "Normal",
+                                                                 tissue %in% c("M", "V")  ~ "Other"))
+
+cd8 <- subset(braun, subset = ClusterName_TCells %in% c("Treg", "Activated CD4.1", "Activated CD4.2", "CD4 TCM.1", "CD4 TCM.2", "Mito-high T cells", "-1"), invert = TRUE)
+
+dirs <- list.files("/nfs/roberts/pi/pi_db2475/lab_data/sc_assays/braun_cancer_cell_2021/raw/TCR/cellranger_output_indexHoppingRemoved", recursive = TRUE, pattern = "all_contig_annotations\\.csv$", full.names = TRUE)
+dirs <- dirs[!str_detect(dirs, "SC_VDJ_ASSEMBLER_CS")]
+dirs <- str_replace(dirs, "all.*$", "")
+
+matching <- read.csv("/nfs/roberts/pi/pi_db2475/ecb86/sc_datasets/braun_cancer_cell/braun_matching2.csv")
+matching <- matching %>% filter(Sample != "")
+
+cd8@meta.data <- cd8@meta.data %>% left_join(matching[, 2:3], by = "Sample")
+cd8@meta.data <- as.data.frame(cd8@meta.data)
+rownames(cd8@meta.data) <- cd8$Cell_barcode
+cd8$Cell_Barcode <- str_replace(cd8$Cell_barcode, "\\-.*$", "-1")
+
+ElbowPlot(cd8, ndims = 50)
+cd8 <- RunUMAP(cd8, dims = 1:30)
+
+cd8$ClusterName_TCells[cd8$ClusterName_TCells == "PMCH+ terminally Exhausted CD8.1"] <- "PMCH+ terminally \n Exhausted CD8.1"
+cd8$ClusterName_TCells[cd8$ClusterName_TCells == "Terminally exhausted CD8.2"] <- "Terminally \n exhausted CD8.2"
+cd8$ClusterName_TCells[cd8$ClusterName_TCells == "Terminally exhausted CD8.3"] <- "Terminally \n exhausted CD8.3"
+```
+
+
+```{r}
+############################################################################
+###                             Figure 1A                                ###
+############################################################################
+cd8@meta.data <- cd8@meta.data %>% mutate(clusters2 = case_when(
+                                                                str_detect(ClusterName_TCells, "CD8 TRM") ~ "Resident\nmemory",
+                                                                str_detect(ClusterName_TCells, "^Exhausted") ~ "Exhausted",
+                                                                str_detect(ClusterName_TCells, "Cytotoxic") ~ "Cytotoxic",
+                                                                str_detect(ClusterName_TCells, "erminally") ~ "Terminally\nexhausted",
+                                                                str_detect(ClusterName_TCells, "Proliferating") ~ "Proliferating"))
+                                                                
+FetchData(cd8, c("umap_1", "umap_2", "clusters2")) %>% ggplot(aes(x = umap_1, y = umap_2)) +
+                                                       geom_point(aes(color = clusters2), size = 0.01, shape = 16) +      
+                                                       theme_void() + 
+                                                       ggtitle("") + 
+                                                       theme(legend.text = element_text(color = "black", size = 4.9, margin = margin(l = 1)), 
+                                                             legend.key.spacing.y = unit(-0.2, "cm"),
+                                                             legend.key.spacing.x = unit(0.1, "cm"),
+                                                             legend.position = "top",
+                                                             legend.margin = margin(t = -5, b = 0),
+                                                             legend.box.margin = margin(t = -15, b = 0)) +
+                                                       guides(color = guide_legend(nrow = 2, override.aes = list(size = 3), keywidth = 0.01)) +
+                                                       scale_color_manual(values = c("aquamarine3", "firebrick2", "orchid4", "steelblue", "chocolate1")) +
+                                                       labs(color = "")
+                                          
+
+
+ggsave("/home/ecb86/Desktop/ECLIPSE/revisions/figures/1a.pdf", width = 1.7, height = 2.0, units = "in", device = cairo_pdf)
+
+```
+
+```{r}
+############################################################################
+###                             Figure 1B                                ###
+############################################################################
+
+cd8_all <- scRep(cd8, folders = dirs, file = "all", batch = "index", group = "tissue", original_barcode = "Cell_Barcode", keepConfidentContigs = TRUE)
+
+cd8_all@meta.data <- cd8_all@meta.data %>% mutate(chain_count = case_when(
+                                                                           is.na(CTaa) ~ 0,
+                                                                          !is.na(CTaa) ~ 2 + str_count(CTaa, ";") - str_detect(CTaa, "^NA_|_NA$")))
+
+cd8_all@meta.data <- cd8_all@meta.data %>% mutate(chain_count2 = case_when(
+                                                                           chain_count > 3 ~ "4+",
+                                                                           chain_count <= 3 ~ as.factor(chain_count)))
+
+
+
+FetchData(cd8_all, c("umap_1", "umap_2", "chain_count2")) %>% ggplot(aes(x = umap_1, y = umap_2)) +
+                                                              geom_point(aes(color = chain_count2), size = 0.01, shape = 16) +      
+                                                              theme_void() + 
+                                                              ggtitle("") + 
+                                                              theme(legend.text = element_text(color = "black", size = 4.9, margin = margin(b = 0, l = 1)), 
+                                                                    legend.key.spacing.y = unit(-0.2, "cm"),
+                                                                    legend.key.spacing.x = unit(0.1, "cm"),
+                                                                    legend.position = "top",
+                                                                    legend.margin = margin(t = -5, b = 0),
+                                                                    legend.box.margin = margin(t = -10, b = 0),
+                                                                    legend.title.position = "top",
+                                                                    legend.title = element_text(size = 6, margin = margin(b = -2), hjust = 0.5)) +
+                                                              guides(color = guide_legend(nrow = 1, override.aes = list(size = 3), keywidth = 0.01)) +
+                                                              scale_color_manual(values = c("grey92", "lightskyblue1", "deepskyblue3", "blue", "navyblue"),
+                                                                                 limits = c("0", "1", "2", "3", "4+")) +
+                                                              labs(color = "TCR chain count")
+
+
+ggsave("/home/ecb86/Desktop/ECLIPSE/revisions/figures/1b1.pdf", width = 1.7, height = 1.9, units = "in", device = cairo_pdf)
+
+chains <- FetchData(cd8_all, c("umap_1", "umap_2", "chain_count2")) %>% 
+            mutate(size = nrow(cd8@meta.data)) %>%
+            group_by(chain_count2) %>% 
+            summarise(pct = 100 * n() / dplyr::first(size))
+
+chains$chain_count2 <- factor(chains$chain_count2, levels = c("4+", "3", "2", "1", "0"))
+
+chains %>% ggplot() + 
+           geom_col(aes(x = 1, y = pct, fill = chain_count2), color = "white", lwd = 0.2) + coord_flip() + 
+           theme_classic() +
+           geom_vline(xintercept = 0.45, lwd = 0.6) + 
+           labs(x = "", y = "", title = "% of cells") + 
+           scale_x_continuous(expand = c(0, 0)) + 
+           scale_y_continuous(breaks = seq(0, 100, 20), 
+                              labels = c("0", "20", "40", "60", "80", "100"), 
+                              expand = c(0, 0), 
+                              limits = c(-0.2, 100.2),
+                              guide = guide_axis(minor.ticks = TRUE)) + 
+           scale_fill_manual(values = c("grey92", "lightskyblue1", "deepskyblue3", "blue", "navyblue"),
+                             limits = c("0", "1", "2", "3", "4+")) +
+           theme(axis.ticks.y = element_blank(), 
+                 axis.text.y = element_blank(), 
+                 axis.text.x = element_text(size = 6, color = "black"), 
+                 axis.title.x = element_text(size = 8, color = "black"),  
+                 legend.text = element_text(color = "black", size = 8),
+                 axis.ticks.length = unit(0.05, "cm"),
+                 axis.ticks.x = element_line(linewidth = 0.3),
+                 legend.position = "none", 
+                 axis.line = element_blank(), 
+                 plot.margin = unit(c(0.5, 0.8, 0.5, 0.5), "cm"), 
+                 plot.title = element_text(size = 8, color = "black", hjust = 0.5))
+
+ggsave("/home/ecb86/Desktop/ECLIPSE/revisions/figures/1b2.pdf", width = 2.5, height = 0.96, units = "in", device = cairo_pdf)
+
+```
+
+```{r}
+############################################################################
+###                             Figure 1C                                ###
+############################################################################
+
+cd8_all@meta.data <- cd8_all@meta.data %>% mutate(missing = case_when(
+                                                                       str_detect(CTaa, "^NA_|_NA$") ~ "Missing\nOne Chain",
+                                                                      !str_detect(CTaa, "^NA_|_NA$") ~ "Both Chains\nDetected",
+                                                                      is.na(CTaa) ~ "Missing\nBoth Chains"),
+                                                  extra = case_when(
+                                                                       str_detect(CTaa, ";") ~ "Extra Chains",
+                                                                      !str_detect(CTaa, ";") ~ "<=1 for\nBoth Chains",
+                                                                      is.na(CTaa) ~ "No TCR\nDetected"),
+                                                  regular = case_when(
+                                                                       !str_detect(CTaa, "^NA_|_NA$") & !str_detect(CTaa, ";") ~ "Regular Chains", 
+                                                                       str_detect(CTaa, "^NA_|_NA$") & str_detect(CTaa, ";") ~ "Missing Chain\n& Extra of\nOther Chain",
+                                                                       str_detect(CTaa, "^NA_|_NA$") & !str_detect(CTaa, ";") ~ "Missing Chain",
+                                                                       !str_detect(CTaa, "^NA_|_NA$") & str_detect(CTaa, ";") ~ "Extra Chain",
+                                                                       is.na(CTaa) ~ "No TCR\nDetected"))
+
+df <- cd8_all@meta.data %>% group_by(donor) %>% 
+                            mutate(donorCount = n()) %>%
+                            group_by(donor, regular) %>% 
+                            summarise(pct = 100 * n() / dplyr::first(donorCount),
+                                      donorCount = dplyr::first(donorCount),
+                                      count = n())
+
+df <- df %>% group_by(donor) %>% 
+             mutate(regularSize = pct[which(regular == "Regular Chains")]) %>% 
+             ungroup()
+
+df$regular <- factor(df$regular, levels = c("No TCR\nDetected", "Missing Chain\n& Extra of\nOther Chain", "Missing Chain", "Extra Chain", "Regular Chains"))
+
+df %>% ggplot() + geom_col(aes(x = reorder(donor, regularSize), y = pct, fill = regular), color = "white", linewidth = 0.2, width = 0.90) + 
+                  labs(fill = "", x = "Patient", y = "% of cells") +
+                  theme_bw() + 
+                  theme(axis.title = element_text(size = 8, color = "black"), 
+                        axis.text = element_text(size = 6, color = "black"), 
+                        legend.position = "bottom", 
+                        axis.text.x = element_blank(),
+                        axis.text.y = element_text(margin = margin(r = 1)),
+                        axis.ticks.x = element_blank(),
+                        axis.ticks.y = element_line(linewidth = 0.3), 
+                        legend.text = element_text(color = "black", size = 4, margin = margin(l = 1, r = -1)), 
+                        legend.key.size = unit(0.2, "cm"), 
+                        axis.title.x = element_text(vjust = -0.5),
+                        plot.margin = unit(c(0.1, 0.7, 0.1, 0.1), "cm"),
+                        panel.border = element_rect(linewidth = 0.7),
+                        panel.grid = element_blank(),
+                        axis.ticks.length = unit(0.05, "cm"),
+                        legend.box.margin = margin(t = -10, b = 0)) +
+                  scale_y_continuous(expand = c(0.015, 0.015), 
+                                     breaks = seq(0, 100, 20), 
+                                     labels = c("0", "20", "40", "60", "80", "100"),
+                                     guide = guide_axis(minor.ticks = TRUE)) + 
+                  scale_x_discrete(expand = c(0.045, 0.045)) +
+                  scale_fill_manual(values = c("grey95", "black", "lightskyblue1", "blue", "deepskyblue3"),
+                                    breaks = c("No TCR\nDetected", "Missing Chain\n& Extra of\nOther Chain", "Missing Chain", "Extra Chain", "Regular Chains"),
+                                    labels = c("No TCR\ndetected", "Missing chain\n& extra of\nother chain", "Missing\nchain", "Extra\nchain", "1 TCRα &\n1 TCRβ")) +
+                  guides(fill = guide_legend(nrow = 1))
+
+
+ggsave("/home/ecb86/Desktop/ECLIPSE/revisions/figures/1c.pdf", width = 3, height = 2.4, units = "in", device = cairo_pdf)
+
+
+### Calculating percentages for text
+median(df$pct[df$regular == "Regular Chains"])
+max(df$pct[df$regular == "Regular Chains"])
+min(df$pct[df$regular == "Regular Chains"])
+
+df2 <- df %>% filter(!regular %in% c("No TCR\nDetected", "Regular Chains")) %>%
+              group_by(donor) %>% summarise(newPct = sum(pct))
+
+median(df2$newPct)
+max(df2$newPct)
+min(df2$newPct)
+
+```
+
+
+```{r}
+############################################################################
+###                          Figure 1D                                   ###
+############################################################################
+
+cd8_all@meta.data <- cd8_all@meta.data %>% mutate(extra1 = case_when(
+                                                                     CTaa %in% c("CRDRVMVAGGYNKLIF;CAVRDVDSGAGSYQLTF_CASSDTAYRQETQYF", "CAVRDVDSGAGSYQLTF_CASSDTAYRQETQYF", "CRDRVMVAGGYNKLIF_CASSDTAYRQETQYF") ~ CTaa,
+                                                                     !CTaa %in% c("CRDRVMVAGGYNKLIF;CAVRDVDSGAGSYQLTF_CASSDTAYRQETQYF", "CAVRDVDSGAGSYQLTF_CASSDTAYRQETQYF", "CRDRVMVAGGYNKLIF_CASSDTAYRQETQYF") ~ "Other"),
+                                                  extra2 = case_when(
+                                                                      CTaa %in% c("CAVRDYGGATNKLIF;CAVEVYGGATNKLIF_CASSGQASYEQYV", "CAVEVYGGATNKLIF_CASSGQASYEQYV", "CAVRDYGGATNKLIF_CASSGQASYEQYV") ~ CTaa,
+                                                                     !CTaa %in% c("CAVRDYGGATNKLIF;CAVEVYGGATNKLIF_CASSGQASYEQYV", "CAVEVYGGATNKLIF_CASSGQASYEQYV", "CAVRDYGGATNKLIF_CASSGQASYEQYV") ~ "Other"),
+                                                  extra3 = case_when(
+                                                                      CTaa %in% c("CALGPYGNNRLAF;CVVFRHGQNFVF_CSARGGQGIRQETQYF", "CVVFRHGQNFVF_CSARGGQGIRQETQYF", "CALGPYGNNRLAF_CSARGGQGIRQETQYF") ~ CTaa,
+                                                                     !CTaa %in% c("CALGPYGNNRLAF;CVVFRHGQNFVF_CSARGGQGIRQETQYF", "CVVFRHGQNFVF_CSARGGQGIRQETQYF", "CALGPYGNNRLAF_CSARGGQGIRQETQYF") ~ "Other"),
+                                                  missing1 = case_when(
+                                                                        CTaa %in% c("CIVRVYNTDKLIF_CASSMGTAYEQYF", "NA_CASSMGTAYEQYF", "CIVRVYNTDKLIF_NA") ~ CTaa,
+                                                                       !CTaa %in% c("CIVRVYNTDKLIF_CASSMGTAYEQYF", "NA_CASSMGTAYEQYF", "CIVRVYNTDKLIF_NA") ~ "Other"),
+                                                  missing2 = case_when(
+                                                                        CTaa %in% c("CALSHYGGATNKLIF_CASSLAFGARQLTFF", "NA_CASSLAFGARQLTFF", "CALSHYGGATNKLIF_NA") ~ CTaa,
+                                                                       !CTaa %in% c("CALSHYGGATNKLIF_CASSLAFGARQLTFF", "NA_CASSLAFGARQLTFF", "CALSHYGGATNKLIF_NA") ~ "Other"),
+                                                  missing3 = case_when(
+                                                                        CTaa %in% c("CAVRGRNSGAGSYQLTF_CASSQGGQFNQPQHF", "NA_CASSQGGQFNQPQHF", "CAVRGRNSGAGSYQLTF_NA") ~ CTaa,
+                                                                       !CTaa %in% c("CAVRGRNSGAGSYQLTF_CASSQGGQFNQPQHF", "NA_CASSQGGQFNQPQHF", "CAVRGRNSGAGSYQLTF_NA") ~ "Other"))
+
+
+### Sub Figure 1
+showClones(cd8_all,
+           variable = "missing1",
+           clones = c("CIVRVYNTDKLIF_CASSMGTAYEQYF", "NA_CASSMGTAYEQYF", "CIVRVYNTDKLIF_NA"),
+           colors = c("lightpink3", "darkseagreen", "dodgerblue3"),
+           type = "missing",
+           count = 3)
+
+           
+ggsave("/home/ecb86/Desktop/ECLIPSE/revisions/figures/1d1a.pdf", width = 1.5, height = 1.7, units = "in", device = cairo_pdf)
+
+meta <- FetchData(cd8_all, c("umap_1", "umap_2", "missing1", "clusters2")) %>% group_by(missing1) %>% 
+                                                                               mutate(total = n()) %>% 
+                                                                               group_by(missing1, clusters2) %>% 
+                                                                               summarise(count = n(),
+                                                                                         pct = 100 * n() / first(total))
+
+meta <- meta %>% ungroup() %>% 
+                 complete(missing1, clusters2) %>% 
+                 filter(missing1 != "Other")
+
+meta[is.na(meta)] <- 0
+
+meta <- meta %>% mutate(new_x = case_when(
+                                          clusters2 == "Proliferating" & missing1 == "CIVRVYNTDKLIF_CASSMGTAYEQYF" ~ 0.8,
+                                          clusters2 == "Proliferating" & missing1 == "CIVRVYNTDKLIF_NA" ~ 1,
+                                          clusters2 == "Proliferating" & missing1 == "NA_CASSMGTAYEQYF" ~ 1.2,
+                                          clusters2 == "Cytotoxic" & missing1 == "CIVRVYNTDKLIF_CASSMGTAYEQYF" ~ 1.8,
+                                          clusters2 == "Cytotoxic" & missing1 == "CIVRVYNTDKLIF_NA" ~ 2,
+                                          clusters2 == "Cytotoxic" & missing1 == "NA_CASSMGTAYEQYF" ~ 2.2,
+                                          clusters2 == "Resident\nmemory" & missing1 == "CIVRVYNTDKLIF_CASSMGTAYEQYF" ~ 2.8,
+                                          clusters2 == "Resident\nmemory" & missing1 == "CIVRVYNTDKLIF_NA" ~ 3,
+                                          clusters2 == "Resident\nmemory" & missing1 == "NA_CASSMGTAYEQYF" ~ 3.2,
+                                          clusters2 == "Exhausted" & missing1 == "CIVRVYNTDKLIF_CASSMGTAYEQYF" ~ 3.8,
+                                          clusters2 == "Exhausted" & missing1 == "CIVRVYNTDKLIF_NA" ~ 4,
+                                          clusters2 == "Exhausted" & missing1 == "NA_CASSMGTAYEQYF" ~ 4.2,
+                                          clusters2 == "Terminally\nexhausted" & missing1 == "CIVRVYNTDKLIF_CASSMGTAYEQYF" ~ 4.8,
+                                          clusters2 == "Terminally\nexhausted" & missing1 == "CIVRVYNTDKLIF_NA" ~ 5,
+                                          clusters2 == "Terminally\nexhausted" & missing1 == "NA_CASSMGTAYEQYF" ~ 5.2))
+
+
+makeLollipop(data = meta, 
+             lab_x = 1, 
+             Color = "missing1", 
+             clones = c("CIVRVYNTDKLIF_CASSMGTAYEQYF", "NA_CASSMGTAYEQYF", "CIVRVYNTDKLIF_NA"), 
+             colors = c("lightpink3", "darkseagreen", "dodgerblue3"), 
+             type = "missing")
+
+ggsave("/home/ecb86/Desktop/ECLIPSE/revisions/figures/1d1b.pdf", width = 2.1, height = 1.7, units = "in", device = cairo_pdf)
+
+### Sub Figure 2
+showClones(cd8_all,
+           variable = "missing2",
+           clones = c("CALSHYGGATNKLIF_CASSLAFGARQLTFF", "NA_CASSLAFGARQLTFF", "CALSHYGGATNKLIF_NA"),
+           colors = c("lightpink3", "darkseagreen", "dodgerblue3"),
+           type = "missing",
+           count = 3)
+
+           
+ggsave("/home/ecb86/Desktop/ECLIPSE/revisions/figures/1d2a.pdf", width = 1.5, height = 1.7, units = "in", device = cairo_pdf)
+
+meta <- FetchData(cd8_all, c("umap_1", "umap_2", "missing2", "clusters2")) %>% group_by(missing2) %>% mutate(total = n()) %>% 
+                                                                               group_by(missing2, clusters2) %>% summarise(count = n(),
+                                                                                                                           pct = 100 * n() / first(total))
+meta <- meta %>% ungroup() %>% complete(missing2, clusters2) %>% filter(missing2 != "Other")
+meta[is.na(meta)] <- 0
+
+meta <- meta %>% mutate(new_x = case_when(
+                                          clusters2 == "Proliferating" & missing2 == "CALSHYGGATNKLIF_CASSLAFGARQLTFF" ~ 0.8,
+                                          clusters2 == "Proliferating" & missing2 == "CALSHYGGATNKLIF_NA" ~ 1,
+                                          clusters2 == "Proliferating" & missing2 == "NA_CASSLAFGARQLTFF" ~ 1.2,
+                                          clusters2 == "Cytotoxic" & missing2 == "CALSHYGGATNKLIF_CASSLAFGARQLTFF" ~ 1.8,
+                                          clusters2 == "Cytotoxic" & missing2 == "CALSHYGGATNKLIF_NA" ~ 2,
+                                          clusters2 == "Cytotoxic" & missing2 == "NA_CASSLAFGARQLTFF" ~ 2.2,
+                                          clusters2 == "Resident\nmemory" & missing2 == "CALSHYGGATNKLIF_CASSLAFGARQLTFF" ~ 2.8,
+                                          clusters2 == "Resident\nmemory" & missing2 == "CALSHYGGATNKLIF_NA" ~ 3,
+                                          clusters2 == "Resident\nmemory" & missing2 == "NA_CASSLAFGARQLTFF" ~ 3.2,
+                                          clusters2 == "Exhausted" & missing2 == "CALSHYGGATNKLIF_CASSLAFGARQLTFF" ~ 3.8,
+                                          clusters2 == "Exhausted" & missing2 == "CALSHYGGATNKLIF_NA" ~ 4,
+                                          clusters2 == "Exhausted" & missing2 == "NA_CASSLAFGARQLTFF" ~ 4.2,
+                                          clusters2 == "Terminally\nexhausted" & missing2 == "CALSHYGGATNKLIF_CASSLAFGARQLTFF" ~ 4.8,
+                                          clusters2 == "Terminally\nexhausted" & missing2 == "CALSHYGGATNKLIF_NA" ~ 5,
+                                          clusters2 == "Terminally\nexhausted" & missing2 == "NA_CASSLAFGARQLTFF" ~ 5.2))
+
+
+makeLollipop(data = meta, 
+             lab_x = 2.4, 
+             Color = "missing2", 
+             clones = c("CALSHYGGATNKLIF_CASSLAFGARQLTFF", "NA_CASSLAFGARQLTFF", "CALSHYGGATNKLIF_NA"), 
+             colors = c("lightpink3", "darkseagreen", "dodgerblue3"), 
+             type = "missing")
+
+ggsave("/home/ecb86/Desktop/ECLIPSE/revisions/figures/1d2b.pdf", width = 2.1, height = 1.7, units = "in", device = cairo_pdf)
+
+
+### Sub Figure 3
+showClones(cd8_all,
+           variable = "missing3",
+           clones = c("CAVRGRNSGAGSYQLTF_CASSQGGQFNQPQHF", "NA_CASSQGGQFNQPQHF"),
+           colors = c("lightpink3", "darkseagreen"),
+           type = "missing",
+           count = 3)
+
+           
+ggsave("/home/ecb86/Desktop/ECLIPSE/revisions/figures/1d3a.pdf", width = 1.5, height = 1.7, units = "in", device = cairo_pdf)
+
+meta <- FetchData(cd8_all, c("umap_1", "umap_2", "missing3", "clusters2")) %>% group_by(missing3) %>% mutate(total = n()) %>% 
+                                                                               group_by(missing3, clusters2) %>% summarise(count = n(),
+                                                                                                                         pct = 100 * n() / first(total))
+meta <- meta %>% ungroup() %>% complete(missing3, clusters2) %>% filter(missing3 != "Other")
+meta[is.na(meta)] <- 0
+
+meta <- meta %>% mutate(new_x = case_when(
+                                          clusters2 == "Proliferating" & missing3 == "CAVRGRNSGAGSYQLTF_CASSQGGQFNQPQHF" ~ 0.9,
+                                          clusters2 == "Proliferating" & missing3 == "NA_CASSQGGQFNQPQHF" ~ 1.1,
+                                          clusters2 == "Cytotoxic" & missing3 == "CAVRGRNSGAGSYQLTF_CASSQGGQFNQPQHF" ~ 1.9,
+                                          clusters2 == "Cytotoxic" & missing3 == "NA_CASSQGGQFNQPQHF" ~ 2.1,
+                                          clusters2 == "Resident\nmemory" & missing3 == "CAVRGRNSGAGSYQLTF_CASSQGGQFNQPQHF" ~ 2.9,
+                                          clusters2 == "Resident\nmemory" & missing3 == "NA_CASSQGGQFNQPQHF" ~ 3.1,
+                                          clusters2 == "Exhausted" & missing3 == "CAVRGRNSGAGSYQLTF_CASSQGGQFNQPQHF" ~ 3.9,
+                                          clusters2 == "Exhausted" & missing3 == "NA_CASSQGGQFNQPQHF" ~ 4.1,
+                                          clusters2 == "Terminally\nexhausted" & missing3 == "CAVRGRNSGAGSYQLTF_CASSQGGQFNQPQHF" ~ 4.9,
+                                          clusters2 == "Terminally\nexhausted" & missing3 == "NA_CASSQGGQFNQPQHF" ~ 5.1))
+
+
+makeLollipop(data = meta, 
+             lab_x = 1, 
+             Color = "missing3", 
+             clones = c("CAVRGRNSGAGSYQLTF_CASSQGGQFNQPQHF", "NA_CASSQGGQFNQPQHF"), 
+             colors = c("lightpink3", "darkseagreen"), 
+             type = "missing")
+
+ggsave("/home/ecb86/Desktop/ECLIPSE/revisions/figures/1d3b.pdf", width = 2.1, height = 1.7, units = "in", device = cairo_pdf)
+
+```
+
+
+```{r}
+############################################################################
+###                             Figure 1E                                ###
+############################################################################
+
+### All 350x350 for UMAP, 650x400 for lollipop plot
+
+
+### Sub-figure 1
+showClones(cd8_all,
+           variable = "extra1",
+           clones = c("CRDRVMVAGGYNKLIF;CAVRDVDSGAGSYQLTF_CASSDTAYRQETQYF", "CAVRDVDSGAGSYQLTF_CASSDTAYRQETQYF", "CRDRVMVAGGYNKLIF_CASSDTAYRQETQYF"),
+           colors = c("darkgreen", "lightsalmon", "darkviolet"),
+           type = "extra")
+
+ggsave("/home/ecb86/Desktop/ECLIPSE/revisions/figures/1e1a.pdf", width = 1.5, height = 1.7, units = "in", device = cairo_pdf)
+
+meta <- FetchData(cd8_all, c("umap_1", "umap_2", "extra1", "clusters2")) %>% group_by(extra1) %>% mutate(total = n()) %>% 
+                                                                             group_by(extra1, clusters2) %>% summarise(count = n(),
+                                                                                                                       pct = 100 * n() / first(total))
+meta <- meta %>% ungroup() %>% complete(extra1, clusters2) %>% filter(extra1 != "Other")
+meta[is.na(meta)] <- 0
+
+meta <- meta %>% mutate(new_x = case_when(
+                                          clusters2 == "Proliferating" & extra1 == "CRDRVMVAGGYNKLIF;CAVRDVDSGAGSYQLTF_CASSDTAYRQETQYF" ~ 1.2,
+                                          clusters2 == "Proliferating" & extra1 == "CRDRVMVAGGYNKLIF_CASSDTAYRQETQYF" ~ 1,
+                                          clusters2 == "Proliferating" & extra1 == "CAVRDVDSGAGSYQLTF_CASSDTAYRQETQYF" ~ 0.8,
+                                          clusters2 == "Cytotoxic" & extra1 == "CRDRVMVAGGYNKLIF;CAVRDVDSGAGSYQLTF_CASSDTAYRQETQYF" ~ 2.2,
+                                          clusters2 == "Cytotoxic" & extra1 == "CRDRVMVAGGYNKLIF_CASSDTAYRQETQYF" ~ 2,
+                                          clusters2 == "Cytotoxic" & extra1 == "CAVRDVDSGAGSYQLTF_CASSDTAYRQETQYF" ~ 1.8,
+                                          clusters2 == "Resident\nmemory" & extra1 == "CRDRVMVAGGYNKLIF;CAVRDVDSGAGSYQLTF_CASSDTAYRQETQYF" ~ 3.2,
+                                          clusters2 == "Resident\nmemory" & extra1 == "CRDRVMVAGGYNKLIF_CASSDTAYRQETQYF" ~ 3,
+                                          clusters2 == "Resident\nmemory" & extra1 == "CAVRDVDSGAGSYQLTF_CASSDTAYRQETQYF" ~ 2.8,
+                                          clusters2 == "Exhausted" & extra1 == "CRDRVMVAGGYNKLIF;CAVRDVDSGAGSYQLTF_CASSDTAYRQETQYF" ~ 4.2,
+                                          clusters2 == "Exhausted" & extra1 == "CRDRVMVAGGYNKLIF_CASSDTAYRQETQYF" ~ 4,
+                                          clusters2 == "Exhausted" & extra1 == "CAVRDVDSGAGSYQLTF_CASSDTAYRQETQYF" ~ 3.8,
+                                          clusters2 == "Terminally\nexhausted" & extra1 == "CRDRVMVAGGYNKLIF;CAVRDVDSGAGSYQLTF_CASSDTAYRQETQYF" ~ 5.2,
+                                          clusters2 == "Terminally\nexhausted" & extra1 == "CRDRVMVAGGYNKLIF_CASSDTAYRQETQYF" ~ 5,
+                                          clusters2 == "Terminally\nexhausted" & extra1 == "CAVRDVDSGAGSYQLTF_CASSDTAYRQETQYF" ~ 4.8))
+
+
+makeLollipop(data = meta, 
+             lab_x = 1, 
+             Color = "extra1", 
+             clones = c("CRDRVMVAGGYNKLIF;CAVRDVDSGAGSYQLTF_CASSDTAYRQETQYF", "CAVRDVDSGAGSYQLTF_CASSDTAYRQETQYF", "CRDRVMVAGGYNKLIF_CASSDTAYRQETQYF"),
+             colors = c("darkgreen", "lightsalmon", "darkviolet"), 
+             type = "extra")
+
+ggsave("/home/ecb86/Desktop/ECLIPSE/revisions/figures/1e1b.pdf", width = 2.1, height = 1.7, units = "in", device = cairo_pdf)
+
+                                          
+### Sub-figure 2
+showClones(cd8_all,
+           variable = "extra2",
+           clones = c("CAVRDYGGATNKLIF;CAVEVYGGATNKLIF_CASSGQASYEQYV", "CAVEVYGGATNKLIF_CASSGQASYEQYV", "CAVRDYGGATNKLIF_CASSGQASYEQYV"),
+           colors = c("darkgreen", "lightsalmon", "darkviolet"), 
+           type = "extra")
+
+           
+ggsave("/home/ecb86/Desktop/ECLIPSE/revisions/figures/1e2a.pdf", width = 1.5, height = 1.7, units = "in", device = cairo_pdf)
+
+meta <- FetchData(cd8_all, c("umap_1", "umap_2", "extra2", "clusters2")) %>% group_by(extra2) %>% mutate(total = n()) %>% 
+                                                                             group_by(extra2, clusters2) %>% summarise(count = n(),
+                                                                                                                       pct = 100 * n() / first(total))
+meta <- meta %>% ungroup() %>% complete(extra2, clusters2) %>% filter(extra2 != "Other")
+meta[is.na(meta)] <- 0
+
+meta <- meta %>% mutate(new_x = case_when(
+                                          clusters2 == "Proliferating" & extra2 == "CAVRDYGGATNKLIF;CAVEVYGGATNKLIF_CASSGQASYEQYV" ~ 1.2,
+                                          clusters2 == "Proliferating" & extra2 == "CAVEVYGGATNKLIF_CASSGQASYEQYV" ~ 1,
+                                          clusters2 == "Proliferating" & extra2 == "CAVRDYGGATNKLIF_CASSGQASYEQYV" ~ 0.8,
+                                          clusters2 == "Cytotoxic" & extra2 == "CAVRDYGGATNKLIF;CAVEVYGGATNKLIF_CASSGQASYEQYV" ~ 2.2,
+                                          clusters2 == "Cytotoxic" & extra2 == "CAVEVYGGATNKLIF_CASSGQASYEQYV" ~ 2,
+                                          clusters2 == "Cytotoxic" & extra2 == "CAVRDYGGATNKLIF_CASSGQASYEQYV" ~ 1.8,
+                                          clusters2 == "Resident\nmemory" & extra2 == "CAVRDYGGATNKLIF;CAVEVYGGATNKLIF_CASSGQASYEQYV" ~ 3.2,
+                                          clusters2 == "Resident\nmemory" & extra2 == "CAVEVYGGATNKLIF_CASSGQASYEQYV" ~ 3,
+                                          clusters2 == "Resident\nmemory" & extra2 == "CAVRDYGGATNKLIF_CASSGQASYEQYV" ~ 2.8,
+                                          clusters2 == "Exhausted" & extra2 == "CAVRDYGGATNKLIF;CAVEVYGGATNKLIF_CASSGQASYEQYV" ~ 4.2,
+                                          clusters2 == "Exhausted" & extra2 == "CAVEVYGGATNKLIF_CASSGQASYEQYV" ~ 4,
+                                          clusters2 == "Exhausted" & extra2 == "CAVRDYGGATNKLIF_CASSGQASYEQYV" ~ 3.8,
+                                          clusters2 == "Terminally\nexhausted" & extra2 == "CAVRDYGGATNKLIF;CAVEVYGGATNKLIF_CASSGQASYEQYV" ~ 5.2,
+                                          clusters2 == "Terminally\nexhausted" & extra2 == "CAVEVYGGATNKLIF_CASSGQASYEQYV" ~ 5,
+                                          clusters2 == "Terminally\nexhausted" & extra2 == "CAVRDYGGATNKLIF_CASSGQASYEQYV" ~ 4.8))
+
+makeLollipop(data = meta, 
+             lab_x = 0.6, 
+             Color = "extra2", 
+             clones = c("CAVRDYGGATNKLIF;CAVEVYGGATNKLIF_CASSGQASYEQYV", "CAVEVYGGATNKLIF_CASSGQASYEQYV", "CAVRDYGGATNKLIF_CASSGQASYEQYV"),
+             colors = c("darkgreen", "lightsalmon", "darkviolet"), 
+             type = "extra")
+
+ggsave("/home/ecb86/Desktop/ECLIPSE/revisions/figures/1e2b.pdf", width = 2.1, height = 1.7, units = "in", device = cairo_pdf)
+
+
+### Sub-figure 3
+showClones(cd8_all,
+           variable = "extra3",
+           clones = c("CALGPYGNNRLAF;CVVFRHGQNFVF_CSARGGQGIRQETQYF", "CVVFRHGQNFVF_CSARGGQGIRQETQYF", "CALGPYGNNRLAF_CSARGGQGIRQETQYF"), 
+           colors = c("darkgreen", "lightsalmon", "darkviolet"), 
+           type = "extra")
+
+           
+ggsave("/home/ecb86/Desktop/ECLIPSE/revisions/figures/1e3a.pdf", width = 1.5, height = 1.7, units = "in", device = cairo_pdf)
+
+meta <- FetchData(cd8_all, c("umap_1", "umap_2", "extra3", "clusters2")) %>% group_by(extra3) %>% mutate(total = n()) %>% 
+                                                                             group_by(extra3, clusters2) %>% summarise(count = n(),
+                                                                                                                       pct = 100 * n() / first(total))
+meta <- meta %>% ungroup() %>% complete(extra3, clusters2) %>% filter(extra3 != "Other")
+meta[is.na(meta)] <- 0
+
+meta <- meta %>% mutate(new_x = case_when(
+                                          clusters2 == "Proliferating" & extra3 == "CALGPYGNNRLAF;CVVFRHGQNFVF_CSARGGQGIRQETQYF" ~ 1.2,
+                                          clusters2 == "Proliferating" & extra3 == "CVVFRHGQNFVF_CSARGGQGIRQETQYF" ~ 1,
+                                          clusters2 == "Proliferating" & extra3 == "CALGPYGNNRLAF_CSARGGQGIRQETQYF" ~ 0.8,
+                                          clusters2 == "Cytotoxic" & extra3 == "CALGPYGNNRLAF;CVVFRHGQNFVF_CSARGGQGIRQETQYF" ~ 2.2,
+                                          clusters2 == "Cytotoxic" & extra3 == "CVVFRHGQNFVF_CSARGGQGIRQETQYF" ~ 2,
+                                          clusters2 == "Cytotoxic" & extra3 == "CALGPYGNNRLAF_CSARGGQGIRQETQYF" ~ 1.8,
+                                          clusters2 == "Resident\nmemory" & extra3 == "CALGPYGNNRLAF;CVVFRHGQNFVF_CSARGGQGIRQETQYF" ~ 3.2,
+                                          clusters2 == "Resident\nmemory" & extra3 == "CVVFRHGQNFVF_CSARGGQGIRQETQYF" ~ 3,
+                                          clusters2 == "Resident\nmemory" & extra3 == "CALGPYGNNRLAF_CSARGGQGIRQETQYF" ~ 2.8,
+                                          clusters2 == "Exhausted" & extra3 == "CALGPYGNNRLAF;CVVFRHGQNFVF_CSARGGQGIRQETQYF" ~ 4.2,
+                                          clusters2 == "Exhausted" & extra3 == "CVVFRHGQNFVF_CSARGGQGIRQETQYF" ~ 4,
+                                          clusters2 == "Exhausted" & extra3 == "CALGPYGNNRLAF_CSARGGQGIRQETQYF" ~ 3.8,
+                                          clusters2 == "Terminally\nexhausted" & extra3 == "CALGPYGNNRLAF;CVVFRHGQNFVF_CSARGGQGIRQETQYF" ~ 5.2,
+                                          clusters2 == "Terminally\nexhausted" & extra3 == "CVVFRHGQNFVF_CSARGGQGIRQETQYF" ~ 5,
+                                          clusters2 == "Terminally\nexhausted" & extra3 == "CALGPYGNNRLAF_CSARGGQGIRQETQYF" ~ 4.8))
+
+makeLollipop(data = meta, 
+             lab_x = 1, 
+             Color = "extra3", 
+             clones = c("CALGPYGNNRLAF;CVVFRHGQNFVF_CSARGGQGIRQETQYF", "CVVFRHGQNFVF_CSARGGQGIRQETQYF", "CALGPYGNNRLAF_CSARGGQGIRQETQYF"), 
+             colors = c("darkgreen", "lightsalmon", "darkviolet"), 
+             type = "extra")
+
+ggsave("/home/ecb86/Desktop/ECLIPSE/revisions/figures/1e3b.pdf", width = 2.1, height = 1.7, units = "in", device = cairo_pdf)
+
+```
+

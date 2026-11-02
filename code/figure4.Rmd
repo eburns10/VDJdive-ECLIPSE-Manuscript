@@ -1,0 +1,1450 @@
+---
+title: "figure4"
+output: html_document
+date: "2025-09-03"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(Seurat)
+library(scRepertoire)
+library(VDJdive)
+library(ggpubr)
+library(ECLIPSE)
+library(ggrepel)
+library(stringdist)
+library(Biostrings)
+
+source("/home/ecb86/Desktop/R_tools/VDJdive_ECLIPSE_paperFunctions.R")
+set.seed(16)
+```
+
+```{r}
+############################################################################
+###                         Pre-Processing                               ###
+############################################################################
+
+braun <- readRDS("/nfs/roberts/pi/pi_db2475/lab_data/sc_assays/braun_cancer_cell_2021/processed/braun_cancer_cell_seurat.rds")
+
+braun@meta.data <- braun@meta.data %>% separate(Sample, into = c("donor", "tissue"), remove = FALSE, sep = "_")
+braun@meta.data <- braun@meta.data %>% mutate(tissue = case_when(
+                                                                 tissue %in% c("T", "T2") ~ "Tumor",
+                                                                 tissue == "N" ~ "Normal",
+                                                                 tissue %in% c("M", "V")  ~ "Other"))
+
+cd8 <- subset(braun, subset = ClusterName_TCells %in% c("Treg", "Activated CD4.1", "Activated CD4.2", "CD4 TCM.1", "CD4 TCM.2", "Mito-high T cells", "-1"), invert = TRUE)
+
+dirs <- list.files("/nfs/roberts/pi/pi_db2475/lab_data/sc_assays/braun_cancer_cell_2021/raw/TCR/cellranger_output_indexHoppingRemoved", recursive = TRUE, pattern = "all_contig_annotations\\.csv$", full.names = TRUE)
+dirs <- dirs[!str_detect(dirs, "SC_VDJ_ASSEMBLER_CS")]
+dirs <- str_replace(dirs, "all.*$", "")
+
+matching <- read.csv("/nfs/roberts/pi/pi_db2475/ecb86/sc_datasets/braun_cancer_cell/braun_matching2.csv")
+matching <- matching %>% filter(Sample != "")
+
+cd8@meta.data <- cd8@meta.data %>% left_join(matching[, 2:3], by = "Sample")
+cd8@meta.data <- as.data.frame(cd8@meta.data)
+rownames(cd8@meta.data) <- cd8$Cell_barcode
+cd8$Cell_Barcode <- str_replace(cd8$Cell_barcode, "\\-.*$", "-1")
+
+ElbowPlot(cd8, ndims = 50)
+cd8 <- RunUMAP(cd8, dims = 1:30)
+
+cd8$ClusterName_TCells[cd8$ClusterName_TCells == "PMCH+ terminally Exhausted CD8.1"] <- "PMCH+ terminally \n Exhausted CD8.1"
+cd8$ClusterName_TCells[cd8$ClusterName_TCells == "Terminally exhausted CD8.2"] <- "Terminally \n exhausted CD8.2"
+cd8$ClusterName_TCells[cd8$ClusterName_TCells == "Terminally exhausted CD8.3"] <- "Terminally \n exhausted CD8.3"
+
+cd8s <- ECLIPSE(contig_folder_paths = dirs, 
+                contig_type = "all", 
+                seurat_object = cd8, 
+                batch = "index", 
+                donor = "donor", 
+                group = "donor", 
+                original_barcode = "Cell_Barcode")
+
+cd8s <- tcrDoubletDetect(cd8s)
+
+```
+
+```{r}
+############################################################################
+###                             Figure 4A                                ###
+############################################################################
+
+d1 <- read.csv("/home/ecb86/Desktop/ECLIPSE/revisions/analysis/simulations/remove/d1.csv")
+d1$type <- "remove"
+
+a1 <- read.csv("/home/ecb86/Desktop/ECLIPSE/revisions/analysis/simulations/add/d1.csv")
+a1$type <- "add"
+
+sim <- rbind(d1, a1)
+
+sim <- sim %>% ungroup() %>% complete(steady, altered, type, iteration)
+
+sim$pct[is.na(sim$pct)] <- 0
+
+### Need to group by iteration and take the mean smh
+sim2 <- sim %>% group_by(steady, altered, type) %>%
+                summarise(mn_pct = mean(pct),
+                          md_pct = median(pct),
+                          Count = n(),
+                          mn_count = mean(count),
+                          md_count = median(count))
+
+
+sim2 %>% ggplot() + 
+         geom_col(aes(x = altered, y = md_pct, fill = steady, color = steady), lwd = 0.4, width = 0.85) + 
+         theme_bw() +
+         labs(y = "Median % of cells", x = "TCR chain set\nmanipulation") +
+         theme(axis.title = element_text(size = 8, color = "black"), 
+               legend.text = element_text(size = 6, color = "black", lineheight = 0.7), 
+               axis.ticks.x = element_blank(), 
+               legend.title = element_text(color = "black", size = 6), 
+               axis.text = element_text(size = 6, color = "black"), 
+               axis.text.x = element_text(size = 8, color = "black", margin = margin(t = 1), vjust = 2),
+               legend.key.size = unit(0.1, "cm"),
+               legend.key.height = unit(0.5, "cm"),
+               legend.box.margin = margin(l = -2, r = -2),
+               legend.margin = margin(l = 0, r = 0),
+               legend.spacing.y = unit(2, "pt"),
+               axis.ticks.length = unit(0.05, "cm"),
+               axis.ticks.y = element_line(linewidth = 0.3),
+               axis.text.y = element_text(margin = margin(r = 1)),
+               strip.text = element_text(size = 6, color = "black"),
+               panel.grid = element_blank()) +
+         scale_y_continuous(expand = c(0.02, 0.02), 
+                            breaks = seq(0, 100, 20), 
+                            guide = guide_axis(minor.ticks = TRUE)) + 
+         labs(fill = "Impact on\npredicted\nclonotype", color = "Impact on\npredicted\nclonotype") + 
+         scale_x_discrete(labels = c("-", "+"), 
+                          expand = expansion(add = 0.6)) +
+         scale_fill_manual(values = alpha(c("chartreuse4", "gold", "dodgerblue4"), 0.7), 
+                           limits = c("Call Now\nAmbiguous", "New Call", "Same Call"),
+                           labels = c("No\nprediction", "Incorrect\nprediction", "Same\nprediction")) +
+         scale_color_manual(values = c("chartreuse4", "gold", "dodgerblue4"), 
+                           limits = c("Call Now\nAmbiguous", "New Call", "Same Call"),
+                           labels = c("No\nprediction", "Incorrect\nprediction", "Same\nprediction")) +
+         facet_wrap(~type, labeller = as_labeller(c("add" = "Chain\naddition", "remove" = "Chain\nremoval")))
+
+ggsave("/home/ecb86/Desktop/ECLIPSE/revisions/figures/4a.pdf", width = 2.0, height = 2.5, units = "in", device = cairo_pdf)
+
+
+### Stats
+r4 <- read.csv("/home/ecb86/Desktop/ECLIPSE/revisions/analysis/simulations/remove/d4.csv")
+```
+
+```{r}
+############################################################################
+###                         Extended Data 3A                             ###
+############################################################################
+r3 <- read.csv("/home/ecb86/Desktop/ECLIPSE/revisions/analysis/simulations/remove/d3.csv")
+a3 <- read.csv("/home/ecb86/Desktop/ECLIPSE/revisions/analysis/simulations/add/d3.csv")
+
+r3$type <- "remove"
+a3$type <- "add"
+sim_size <- rbind(r3, a3)
+
+sim_size <- sim_size %>% complete(cloneSize2, steady, iteration, type)
+sim_size$pct[is.na(sim_size$pct)] <- 0
+sim_size$ct[is.na(sim_size$ct)] <- 0
+
+sim_size2 <- sim_size %>% group_by(cloneSize2, steady, type) %>%
+                          summarise(mn_pct = mean(pct),
+                                    md_pct = median(pct),
+                                    mn_ct = mean(ct),
+                                    count = n())
+
+sizes <- sim_size %>% group_by(iteration, cloneSize2, type) %>%
+                      summarise(count = n(),
+                                types = n_distinct(ct),
+                                new_ct = max(ct))
+
+
+sim_size2 %>% ggplot(aes(x = cloneSize2, y = mn_pct)) +
+          geom_col(aes(fill = steady), color = "white", linewidth = 0.5) +
+          scale_fill_manual(values = c("yellow3", "chartreuse4", "dodgerblue4"),
+                            limits = c("New Call", "Call Now\nAmbiguous", "Same Call"),
+                            labels = c("Incorrect\nPrediction", "No\nPrediction", "Same\nPrediction")) +
+          scale_x_discrete(limits = c("Small", "Medium", "Large")) +
+          theme_classic() + 
+          ylab("% of Cells") + xlab("Clone Size") + labs(fill = "Impact on\nPredicted\nClonotype") +
+          theme(text = element_text(color = "black"),
+                axis.title = element_text(size = 20), legend.text = element_text(size = 14, color = "black"), axis.ticks.x = element_blank(), 
+                legend.title = element_text(size = 14), axis.text = element_text(size = 14, color = "black"), axis.text.x = element_text(size = 16)) +
+          scale_y_continuous(expand = c(0.01, 0.01), breaks = seq(0, 100, 10), labels = c(0, "", 20, "", 40, "", 60, "", 80, "", 100)) +
+          facet_wrap(~type)
+          
+
+sim_size2 %>% ggplot() + 
+              geom_col(aes(x = cloneSize2, y = md_pct, fill = steady, color = steady), lwd = 0.4, width = 0.85) + 
+              theme_bw() +
+              labs(y = "Median % of cells", x = "Clone size") +
+              theme(axis.title = element_text(size = 8, color = "black"), 
+                    legend.text = element_text(size = 6, color = "black", lineheight = 0.7), 
+                    legend.title = element_text(color = "black", size = 6), 
+                    axis.text = element_text(size = 6, color = "black"), 
+                    axis.text.x = element_text(size = 8, color = "black", margin = margin(t = 1), vjust = 1, hjust = 1, angle = 45),
+                    legend.key.size = unit(0.1, "cm"),
+                    legend.box.margin = margin(l = -2, r = -2),
+                    legend.margin = margin(l = 0, r = 0),
+                    legend.spacing.y = unit(2, "pt"),
+                    axis.ticks.length = unit(0.05, "cm"),
+                    legend.key.height = unit(0.5, "cm"),
+                    axis.ticks = element_line(linewidth = 0.3),
+                    axis.text.y = element_text(margin = margin(r = 1)),
+                    strip.text = element_text(size = 6, color = "black"),
+                    panel.grid = element_blank()) +
+              scale_y_continuous(expand = c(0.02, 0.02), 
+                                 breaks = seq(0, 100, 20), 
+                                 guide = guide_axis(minor.ticks = TRUE)) + 
+              labs(fill = "Impact on\npredicted\nclonotype", color = "Impact on\npredicted\nclonotype") + 
+              scale_x_discrete(limits = c("Small", "Medium", "Large"),
+                               expand = expansion(add = 0.6)) +
+              scale_fill_manual(values = alpha(c("gold", "chartreuse4", "dodgerblue4"), 0.7), 
+                                limits = c("New Call", "Call Now\nAmbiguous", "Same Call"),
+                                labels = c("Incorrect\nprediction", "No\nprediction", "Same\nprediction")) +
+              scale_color_manual(values = c("gold", "chartreuse4", "dodgerblue4"), 
+                                limits = c("New Call", "Call Now\nAmbiguous", "Same Call"),
+                                labels = c("Incorrect\nprediction", "No\nprediction", "Same\nprediction")) +
+              facet_wrap(~type, labeller = as_labeller(c("add" = "Chain\naddition", "remove" = "Chain\nremoval")))
+
+ggsave("/home/ecb86/Desktop/ECLIPSE/revisions/figures/s3a.pdf", width = 2.5, height = 2.5, units = "in", device = cairo_pdf)
+```
+
+```{r}
+############################################################################
+###                         Extended Data 3B                             ###
+############################################################################
+meta_rcc <- read.csv("/home/ecb86/Desktop/ECLIPSE/revisions/analysis/sensitivity_analysis/meta_rcc.csv")
+accuracy_rcc <- read.csv("/home/ecb86/Desktop/ECLIPSE/revisions/analysis/sensitivity_analysis/accuracy_rcc.csv")
+coverage_rcc <- read.csv("/home/ecb86/Desktop/ECLIPSE/revisions/analysis/sensitivity_analysis/coverage_rcc.csv")
+
+cov_rcc <- coverage_rcc %>% group_by(condition, donor) %>%
+                        mutate(pct_with_tcr = 100 * pct / sum(pct[which(cloneCallSource %in% c("VDJdive", "scRepertoire"))])) %>%
+                        ungroup()
+
+cov_rcc <- cov_rcc %>% group_by(condition, cloneCallSource) %>%
+                       summarise(md_pct = median(pct),
+                                 mn_pct = mean(pct),
+                                 md_pct_with_tcr = median(pct_with_tcr),
+                                 mn_pct_with_tcr = mean(pct_with_tcr))
+
+cov_rcc <- cov_rcc %>% filter(cloneCallSource == "VDJdive") %>%
+                       mutate(iteration = -0.3)
+
+acc_rcc <- accuracy_rcc %>% filter(altered == TRUE) %>% 
+                            complete(iteration, condition, steady) %>%
+                            filter(steady == "New Call")
+
+acc_rcc$pct[is.na(acc_rcc$pct)] <- 0 
+
+
+acc2_rcc <- acc_rcc %>% group_by(condition) %>%
+                        summarise(count = n(),
+                                  md_pct_newcall = median(pct),
+                                  mn_pct_newcall = mean(pct))
+
+
+sens_rcc <- cov_rcc %>% left_join(acc2_rcc, by = "condition")
+
+
+
+### Final
+sens_rcc %>% ggplot(aes(x = md_pct_with_tcr, y = md_pct_newcall)) +
+             geom_path(aes(group = iteration), color = "grey70", linewidth = 0.5) +
+             geom_point(color = "coral2", size = 1) + 
+             geom_text_repel(aes(label = condition), size = 3, max.overlaps = Inf, force = 0.01, segment.size = 0.2) +
+             theme_bw() + xlim(50, 100) + ylim(0, 20) +
+             theme(panel.grid = element_blank(),
+                   panel.border = element_rect(linewidth = 0.7),
+                   axis.title = element_text(size = 8, color = "black"),
+                   axis.text = element_text(color = "black", size = 6),
+                   plot.title = element_text(color = "black", hjust = 0.5, size = 8),
+                   axis.ticks.length = unit(0.05, "cm"),
+                   axis.ticks = element_line(linewidth = 0.3),
+                   axis.text.y = element_text(margin = margin(r = 1)),
+                   axis.text.x = element_text(margin = margin(t = 1))) +
+             labs(x = "Median % of cells with a\nclonotype predicted", y = "Median % of incorrect predictions", title = "Renal cell carcinoma")
+
+ggsave("/home/ecb86/Desktop/ECLIPSE/revisions/figures/s3b.pdf", width = 2.2, height = 2.5, units = "in", device = cairo_pdf)
+```
+
+```{r}
+############################################################################
+###                         Extended Data 3C                             ###
+############################################################################
+meta_mel <- read.csv("/home/ecb86/Desktop/ECLIPSE/revisions/analysis/sensitivity_analysis/meta_mel.csv")
+accuracy_mel <- read.csv("/home/ecb86/Desktop/ECLIPSE/revisions/analysis/sensitivity_analysis/accuracy_mel.csv")
+coverage_mel <- read.csv("/home/ecb86/Desktop/ECLIPSE/revisions/analysis/sensitivity_analysis/coverage_mel.csv")
+
+cov_mel <- coverage_mel %>% group_by(condition, patient) %>%
+                        mutate(pct_with_tcr = 100 * pct / sum(pct[which(cloneCallSource %in% c("VDJdive", "scRepertoire"))])) %>%
+                        ungroup()
+
+cov_mel <- cov_mel %>% group_by(condition, cloneCallSource) %>%
+                       summarise(md_pct = median(pct),
+                                 mn_pct = mean(pct),
+                                 md_pct_with_tcr = median(pct_with_tcr),
+                                 mn_pct_with_tcr = mean(pct_with_tcr))
+
+cov_mel <- cov_mel %>% filter(cloneCallSource == "VDJdive") %>%
+                       mutate(iteration = -0.3)
+
+acc_mel <- accuracy_mel %>% filter(altered == TRUE) %>% 
+                            complete(iteration, condition, steady) %>%
+                            filter(steady == "New Call")
+
+acc_mel$pct[is.na(acc_mel$pct)] <- 0 
+
+
+acc2_mel <- acc_mel %>% group_by(condition) %>%
+                        summarise(count = n(),
+                                  md_pct_newcall = median(pct),
+                                  mn_pct_newcall = mean(pct))
+
+
+sens_mel <- cov_mel %>% left_join(acc2_mel, by = "condition")
+
+
+
+### Final
+sens_mel %>% ggplot(aes(x = md_pct_with_tcr, y = md_pct_newcall)) +
+             geom_path(aes(group = iteration), color = "grey70", linewidth = 0.5) +
+             geom_point(color = "coral2", size = 1) + 
+             geom_text_repel(aes(label = condition), size = 3, max.overlaps = Inf, force = 0.01, segment.size = 0.2) +
+             theme_bw() + xlim(50, 100) + ylim(0, 20) +
+             theme(panel.grid = element_blank(),
+                   panel.border = element_rect(linewidth = 0.7),
+                   axis.title = element_text(size = 8, color = "black"),
+                   axis.text = element_text(color = "black", size = 6),
+                   plot.title = element_text(color = "black", hjust = 0.5, size = 8),
+                   axis.ticks.length = unit(0.05, "cm"),
+                   axis.ticks = element_line(linewidth = 0.3),
+                   axis.text.y = element_text(margin = margin(r = 1)),
+                   axis.text.x = element_text(margin = margin(t = 1))) +
+             labs(x = "Median % of cells with a\nclonotype predicted", y = "Median % of incorrect predictions", title = "Melanoma")
+
+ggsave("/home/ecb86/Desktop/ECLIPSE/revisions/figures/s3c.pdf", width = 2.2, height = 2.5, units = "in", device = cairo_pdf)
+```
+
+```{r}
+############################################################################
+###                         Extended Data 3D                             ###
+############################################################################
+
+accuracy2_rcc <- accuracy_rcc %>% filter(altered == TRUE) %>% 
+                                  complete(iteration, condition, steady)
+
+accuracy2_rcc$pct[is.na(accuracy2_rcc$pct)] <- 0 
+
+accuracy2_rcc %>% ggplot() +
+                  geom_col(aes(x = condition, y = pct, fill = steady), color = "white", linewidth = 0.2, width = 0.95) +
+                  facet_wrap(~iteration, nrow = 1, labeller = as_labeller(setNames(paste0("Sim. #", 1:10), 1:10))) +
+                  theme_bw() +
+                  labs(x = "Probability thresholds for calling clones", y = "% of cells", fill = "Impact on\nPredicted\nClonotype", title = "Renal cell carcinoma") +
+                  theme(legend.position = "bottom",
+                        axis.text = element_text(size = 6, color = "black"),
+                        panel.grid = element_blank(),
+                        plot.title = element_text(size = 8, hjust = 0.5, color = "black"),
+                        axis.title = element_text(size = 6, color = "black"),
+                        strip.text.x = element_text(size = 6, color = "black"),
+                        legend.text = element_text(size = 6, color = "black"),
+                        legend.title = element_text(size = 6, color = "black"),
+                        legend.key.width = unit(0.1, "cm")) +
+                  scale_y_continuous(expand = c(0.01, 0.01)) +
+                  scale_x_discrete(expand = c(0.02, 0.02)) +
+                  scale_fill_manual(values = alpha(c("gold", "chartreuse4", "dodgerblue4"), 0.7), 
+                                    limits = c("New Call", "Call Now\nAmbiguous", "Same Call"),
+                                    labels = c("Incorrect\nprediction", "No\nprediction", "Same\nprediction"))
+
+### #8 chosen
+
+ggsave("/home/ecb86/Desktop/ECLIPSE/revisions/figures/s3d.pdf", width = 7.5, height = 2, units = "in", device = cairo_pdf)
+```
+
+```{r}
+############################################################################
+###                         Extended Data 3E                             ###
+############################################################################
+
+accuracy2_mel <- accuracy_mel %>% filter(altered == TRUE) %>% 
+                                  complete(iteration, condition, steady)
+
+accuracy2_mel$pct[is.na(accuracy2_mel$pct)] <- 0 
+
+accuracy2_mel %>% ggplot() +
+                  geom_col(aes(x = condition, y = pct, fill = steady), color = "white", linewidth = 0.2, width = 0.95) +
+                  facet_wrap(~iteration, nrow = 1, labeller = as_labeller(setNames(paste0("Sim. #", 1:10), 1:10))) +
+                  theme_bw() +
+                  labs(x = "Probability thresholds for calling clones", y = "% of cells", fill = "Impact on\nPredicted\nClonotype", title = "Melanoma") +
+                  theme(legend.position = "bottom",
+                        axis.text = element_text(size = 6, color = "black"),
+                        panel.grid = element_blank(),
+                        plot.title = element_text(size = 8, hjust = 0.5, color = "black"),
+                        axis.title = element_text(size = 6, color = "black"),
+                        strip.text.x = element_text(size = 6, color = "black"),
+                        legend.text = element_text(size = 6, color = "black"),
+                        legend.title = element_text(size = 6, color = "black"),
+                        legend.key.width = unit(0.1, "cm")) +
+                  scale_y_continuous(expand = c(0.01, 0.01)) +
+                  scale_x_discrete(expand = c(0.02, 0.02)) +
+                  scale_fill_manual(values = alpha(c("gold", "chartreuse4", "dodgerblue4"), 0.7), 
+                                    limits = c("New Call", "Call Now\nAmbiguous", "Same Call"),
+                                    labels = c("Incorrect\nprediction", "No\nprediction", "Same\nprediction"))
+
+### #8 chosen
+
+ggsave("/home/ecb86/Desktop/ECLIPSE/revisions/figures/s3e.pdf", width = 7.5, height = 2, units = "in", device = cairo_pdf)
+```
+
+```{r}
+############################################################################
+###                             Figure 4B                                ###
+############################################################################
+r2 <- read.csv("/home/ecb86/Desktop/ECLIPSE/revisions/analysis/simulations/remove/d2.csv")
+a2 <- read.csv("/home/ecb86/Desktop/ECLIPSE/revisions/analysis/simulations/add/d2.csv")
+
+r2$type <- "remove"
+a2$type <- "add"
+
+sim_div <- rbind(r2, a2)
+
+sim_div <- sim_div %>% pivot_longer(c(1:3), names_to = "condition", values_to = "shannon")
+
+sim_div2 <- sim_div %>% group_by(iteration, type) %>%
+                        mutate(rel_shannon = 100 * shannon / shannon[condition == "gt"]) %>%
+                        ungroup()
+
+sim_div2 %>% ggplot(aes(x = condition, y = rel_shannon)) + 
+             geom_path(aes(group = iteration), color = "black", alpha = 0.2, linewidth = 0.2, position = position_jitter(width = 0.35, height = 0, seed = 7)) +
+             geom_point(aes(fill = condition), color = "black", shape = 21, size = 2, stroke = 0.3, position = position_jitter(width = 0.35, height = 0, seed = 7)) +
+             theme_bw() +
+             scale_fill_manual(values = c("darkseagreen4", "darkmagenta", "bisque")) +
+             theme(axis.title = element_text(size = 8, color = "black"),
+                   axis.text = element_text(color = "black", size = 6),
+                   panel.border = element_rect(color = "black", linewidth = 0.5),
+                   panel.grid = element_blank(),
+                   legend.position = "none",
+                   axis.ticks = element_line(linewidth = 0.3),
+                   axis.ticks.length = unit(0.05, "cm"),
+                   axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1.05),
+                   axis.text.y = element_text(hjust = 3),
+                   strip.text = element_text(size = 8)) +
+             scale_x_discrete(limits = c("gt", "sim", "sim_e"), 
+                             labels = c("Ground truth", "Simulation", "Simulation then ECLIPSE")) +
+             scale_y_continuous(expand = expansion(mult = c(0.1, 0.2)),
+                                guide = guide_axis(minor.ticks = TRUE)) +
+             labs(x = "", y = "Adjusted Shannon index\n(% of ground truth)") +
+             facet_wrap(~type, labeller = as_labeller(c("add" = "Chain\naddition", "remove" = "Chain\nremoval"))) +
+             stat_compare_means(method = "kruskal", size = 1.5, label.sep = "\n", label.y = 118, label.x.npc = 0.15)
+
+sim_div3 <- sim_div2 %>% mutate(condition2 = case_when(
+                                                      type == "remove" & condition == "sim" ~ "Sim. (- chain)",
+                                                      type == "add" & condition == "sim" ~ "Sim. (+ chain)",
+                                                      condition == "sim_e" ~ paste("Sim.", "\U2192", "ECLIPSE"),
+                                                      condition == "gt" ~ "Ground truth"))
+
+kw <- sim_div3 %>% group_by(type) %>%
+                   summarise(p = kruskal.test(rel_shannon ~ condition2)$p.value) %>%
+                   mutate(label = paste0("Kruskal-Wallis,\n  p = ", round(p, digits = 6)),
+                          x = 2,
+                          y = 119)
+                            
+
+sim_div3 %>% ggplot(aes(x = condition2, y = rel_shannon)) + 
+             geom_path(aes(group = iteration), color = "black", alpha = 0.2, linewidth = 0.2, position = position_jitter(width = 0.35, height = 0, seed = 7)) +
+             geom_point(aes(fill = condition2), color = "black", shape = 21, size = 2, stroke = 0.3, position = position_jitter(width = 0.35, height = 0, seed = 7)) +
+             geom_text(data = kw, aes(x = x, y = y, label = label), inherit.aes = FALSE, size = 1.5) +
+             theme_bw() +
+             scale_fill_manual(values = c("darkseagreen4", "darkmagenta", "darkmagenta", "bisque")) +
+             theme(axis.title = element_text(size = 8, color = "black"),
+                   axis.text = element_text(color = "black", size = 6),
+                   panel.border = element_rect(color = "black", linewidth = 0.5),
+                   panel.grid = element_blank(),
+                   legend.position = "none",
+                   axis.ticks = element_line(linewidth = 0.3),
+                   axis.ticks.length = unit(0.05, "cm"),
+                   axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1.05),
+                   axis.text.y = element_text(hjust = 3),
+                   strip.text = element_text(size = 8),
+                   plot.margin = unit(c(t = 0.5, r = 0.5, b = -0.5, l = 0.5), "lines")) +
+             scale_y_continuous(expand = expansion(mult = c(0.1, 0.15)),
+                                guide = guide_axis(minor.ticks = TRUE)) +
+             labs(x = "", y = "Adjusted Shannon index\n(% of ground truth)") +
+             facet_wrap(~type, labeller = as_labeller(c("add" = "Chain\naddition", "remove" = "Chain\nremoval")), scales = "free_x")
+
+
+ggsave("/home/ecb86/Desktop/ECLIPSE/revisions/figures/4b.pdf", width = 2.0, height = 2.6, units = "in", device = cairo_pdf)
+```
+
+
+```{r}
+############################################################################
+###                             Figure 4E                                ###
+############################################################################
+
+cd8s@meta.data <- cd8s@meta.data %>% mutate(clusters2 = case_when(
+                                                                  str_detect(ClusterName_TCells, "CD8 TRM") ~ "Resident\nmemory",
+                                                                  str_detect(ClusterName_TCells, "^Exhausted") ~ "Exhausted",
+                                                                  str_detect(ClusterName_TCells, "Cytotoxic") ~ "Cytotoxic",
+                                                                  str_detect(ClusterName_TCells, "erminally") ~ "Terminally\nexhausted",
+                                                                  str_detect(ClusterName_TCells, "Proliferating") ~ "Proliferating"))
+
+### 2000x500
+threeC_results <- compareClones(cd8s, clusters = "clusters2", cloneThresh = 100, cloneClassThresh = 10)
+df <- threeC_results[[1]]
+plot3c <- threeC_results[[2]]
+
+plot3c %>% ggplot(aes(x = class, y = Pct)) + 
+           geom_line(aes(group = CTaa, color = CTaa), linewidth = 0.2) +
+           geom_point(aes(color = CTaa), size = 1) + 
+           facet_wrap(~clusters, nrow = 2) +
+           theme_bw() + 
+           theme(legend.position = "none", 
+                 axis.text = element_text(size = 6, color = "black"), 
+                 axis.title = element_text(size = 8, color = "black"),
+                 axis.text.y = element_text(margin = margin(r = 1)),
+                 axis.text.x = element_text(vjust = 2),
+                 panel.grid = element_blank(),
+                 panel.border = element_rect(linewidth = 0.5),
+                 axis.ticks = element_line(linewidth = 0.3),
+                 axis.ticks.length = unit(0.05, "cm"),
+                 strip.text = element_text(color = "black", size = 6), 
+                 strip.background = element_rect(fill = "grey80"),
+                 panel.spacing.x = unit(0.1, "cm"),
+                 plot.margin = unit(c(t = 0.5, r = 0, b = 0, l = 0), "lines")) + 
+           scale_x_discrete(limits = c("1°", "1°\n&\n2°", "2°", "NA"),
+                            labels = c("A", "B", "C", "D")) +
+           scale_y_continuous(guide = guide_axis(minor.ticks = TRUE)) +  
+           ylab("% of cells") + 
+           xlab("Bitypic chain set")
+
+ggsave("/home/ecb86/Desktop/ECLIPSE/revisions/figures/4e.pdf", width = 2.5, height = 2.8, units = "in", device = cairo_pdf)
+          
+```
+
+```{r}
+############################################################################
+###                             Figure 4F                                ###
+############################################################################
+set.seed(16)
+threeD_results <- compareClones(cd8s, clusters = "ClusterName_TCells", cloneThresh = 100, cloneClassThresh = 5)
+df <- threeD_results[[1]]
+plot3d <- threeD_results[[2]]
+
+
+perm <- clusterPermutationTest1v2(cd8s, tcr = df, minCells = 5, clusters = "ClusterName_TCells")
+
+perm_diffs <- perm[[1]]
+mean_diff <- perm[[2]]
+
+label <- case_when(sum(perm_diffs <= mean_diff) == 0 ~ "p < 0.0001",
+                   sum(perm_diffs <= mean_diff) != 0 ~ paste("p = ", sum(perm_diffs <= mean_diff) / length(perm_diffs), sep = ""))
+
+
+
+ggplot() + geom_density(aes(x = perm_diffs, fill = "Randomly\npermuted\nclones"), color = "black", linewidth = 0.2, alpha = 0.3) + 
+           geom_vline(aes(xintercept = mean_diff, color = "Observed\n3 TCR\nchain\nclones"), lwd = 0.5, linetype = "dotted") +
+           annotate("text", x = 0.9, y = 7.2, label = label, size = 1.5) +
+           annotate("text", x = 0.88, y = 1.1, label = "Permuted\nclones", size = 1.5, lineheight = 0.8) +
+           annotate("text", x = 0.19, y = 6, label = "Observed\n3 TCR\nchain\nclones", size = 1.5, lineheight = 0.8, hjust = 0) +
+           ggtitle("3 TCR chain clones") + 
+           theme_bw() +  
+           coord_cartesian(xlim = c(0, 1), clip = "off") + 
+           labs(x = "Intra-clone cluster\ndistribution dissimilarity", y = "Density", fill = "", color = "") +
+           theme(plot.title = element_text(hjust = 0.5, color = "black", size = 8), 
+                 axis.text = element_text(size = 6, color = "black"), 
+                 legend.margin = margin(r = 0, l = 0, t = -10, b = 2), 
+                 axis.title = element_text(size = 8, color = "black"), 
+                 plot.subtitle = element_text(hjust = 0.5, size = 6),
+                 legend.position = "none",
+                 plot.margin = unit(c(0.5, 0.5, 0.2, 0), "lines"), 
+                 axis.title.x = element_text(vjust = 0),
+                 panel.grid = element_blank(),
+                 panel.border = element_rect(linewidth = 0.3, color = "black"),
+                 axis.text.y = element_blank(),
+                 axis.ticks = element_line(linewidth = 0.3),
+                 axis.ticks.y = element_blank(),
+                 axis.ticks.length = unit(0.05, "cm"),) +
+           scale_y_continuous(expand = expansion(mult = c(0, 0.05)),
+                              guide = guide_axis(minor.ticks = TRUE)) + 
+           scale_x_continuous(guide = guide_axis(minor.ticks = TRUE)) +
+           scale_fill_manual(values = c("Randomly\npermuted\nclones" = "indianred4")) + 
+           scale_color_manual(values = c("Observed\n3 TCR\nchain\nclones" = "purple3"))
+
+
+ggsave("/home/ecb86/Desktop/ECLIPSE/revisions/figures/4f.pdf", width = 1.6, height = 1.6, units = "in", device = cairo_pdf)                               
+
+```
+
+
+```{r}
+############################################################################
+###                             Figure 4G                                ###
+############################################################################
+set.seed(16)
+perm2 <- clusterPermutationTestMissing(cd8s, tcr = df, minCells = 5, clusters = "ClusterName_TCells")
+
+perm_diffs2 <- perm2[[1]]
+mean_diff2 <- perm2[[2]]
+
+label2 <- case_when(sum(perm_diffs2 <= mean_diff2) == 0 ~ "p < 0.0001",
+                    sum(perm_diffs2 <= mean_diff2) != 0 ~ paste("p = ", sum(perm_diffs2 <= mean_diff2) / length(perm_diffs2), sep = ""))
+              
+ggplot() + geom_density(aes(x = perm_diffs2, fill = "Randomly\npermuted\nclones"), color = "black", linewidth = 0.2, alpha = 0.3) + 
+           geom_vline(aes(xintercept = mean_diff2, color = "Observed\nclones"), lwd = 0.5, linetype = "dotted") +
+           annotate("text", x = 0.85, y = 16.5, label = label2, size = 1.5) +
+           annotate("text", x = 0.83, y = 2, label = "Permuted\nclones", size = 1.5, lineheight = 0.8) +
+           annotate("text", x = 0.29, y = 13, label = "Observed\nclones", size = 1.5, lineheight = 0.8, hjust = 0) +
+           ggtitle("All clones") + 
+           theme_bw() +  
+           coord_cartesian(xlim = c(0, 1), clip = "off") + 
+           labs(x = "Intra-clone cluster\ndistribution dissimilarity", y = "Density", fill = "", color = "") +
+           theme(plot.title = element_text(hjust = 0.5, color = "black", size = 8), 
+                 axis.text = element_text(size = 6, color = "black"), 
+                 legend.margin = margin(r = 0, l = 0, t = -10, b = 2), 
+                 axis.title = element_text(size = 8, color = "black"), 
+                 plot.subtitle = element_text(hjust = 0.5, size = 6),
+                 legend.position = "none",
+                 plot.margin = unit(c(0.5, 0.5, 0.2, 0), "lines"), 
+                 axis.title.x = element_text(vjust = 0),
+                 panel.grid = element_blank(),
+                 panel.border = element_rect(linewidth = 0.3, color = "black"),
+                 axis.text.y = element_blank(),
+                 axis.ticks = element_line(linewidth = 0.3),
+                 axis.ticks.y = element_blank(),
+                 axis.ticks.length = unit(0.05, "cm")) +
+           scale_y_continuous(expand = expansion(mult = c(0, 0.05)),
+                              guide = guide_axis(minor.ticks = TRUE)) + 
+           scale_x_continuous(guide = guide_axis(minor.ticks = TRUE)) +
+           scale_fill_manual(values = c("Randomly\npermuted\nclones" = "darkcyan")) + 
+           scale_color_manual(values = c("Observed\nclones" = "darkorange3"))
+
+           
+ggsave("/home/ecb86/Desktop/ECLIPSE/revisions/figures/4g.pdf", width = 1.6, height = 1.6, units = "in", device = cairo_pdf)   
+```
+
+```{r}
+############################################################################
+###                         Extended Data 3F                             ###
+############################################################################
+
+assignment_matrix <- getAssignmentMatrix(cd8,
+                                         contig_folder_paths = dirs,
+                                         contig_type = "all",
+                                         original_barcode = "Cell_Barcode",
+                                         batch = "index",
+                                         donor = "donor",
+                                         group = "donor")
+
+threeD_results <- compareClones(cd8s, clusters = "ClusterName_TCells", cloneThresh = 100, cloneClassThresh = 5)
+df <- threeD_results[[1]]
+plot3d <- threeD_results[[2]]
+
+perm_sim <- clusterPermutationTestSimilarChains1v2(cd8s, tcr = df, minCells = 5, clusters = "ClusterName_TCells", assignment_matrix = assignment_matrix)
+
+perm_sim_diffs <- perm_sim[[1]]
+mean_sim_diff <- perm_sim[[2]]
+sum(perm_sim_diffs < mean_sim_diff) / 10000
+
+
+label <- case_when(sum(perm_sim_diffs <= mean_sim_diff) == 0 ~ "p < 0.0001",
+                   sum(perm_sim_diffs <= mean_sim_diff) != 0 ~ paste("p = ", sum(perm_sim_diffs <= mean_sim_diff) / length(perm_sim_diffs), sep = ""))
+
+ggplot() + geom_density(aes(x = perm_sim_diffs, fill = "Randomly\npermuted\nclones"), color = "black", linewidth = 0.2, alpha = 0.3) + 
+           geom_vline(aes(xintercept = mean_sim_diff, color = "Observed\n3 TCR\nchain\nclones"), lwd = 0.5, linetype = "dotted") +
+           annotate("text", x = 0.85, y = 8, label = label, size = 1.5) +
+           annotate("text", x = 0.55, y = 0.9, label = "Permuted\nclones", size = 1.5, lineheight = 0.8) +
+           annotate("text", x = 0.16, y = 6, label = "Observed\n3 TCR\nchain\nclones", size = 1.5, lineheight = 0.8, hjust = 1) +
+           ggtitle("3 TCR chain clones") + 
+           theme_bw() +  
+           coord_cartesian(xlim = c(0, 1), clip = "off") + 
+           labs(x = "Intra-clone cluster\ndistribution dissimilarity", y = "Density", fill = "", color = "") +
+           theme(plot.title = element_text(hjust = 0.5, color = "black", size = 8), 
+                 axis.text = element_text(size = 6, color = "black"), 
+                 legend.margin = margin(r = 0, l = 0, t = -10, b = 2), 
+                 axis.title = element_text(size = 8, color = "black"), 
+                 plot.subtitle = element_text(hjust = 0.5, size = 6),
+                 legend.position = "none",
+                 plot.margin = unit(c(0.5, 0.5, 0.2, 0), "lines"), 
+                 axis.title.x = element_text(vjust = 0),
+                 panel.grid = element_blank(),
+                 panel.border = element_rect(linewidth = 0.3, color = "black"),
+                 axis.text.y = element_blank(),
+                 axis.ticks = element_line(linewidth = 0.3),
+                 axis.ticks.y = element_blank(),
+                 axis.ticks.length = unit(0.05, "cm"),) +
+           scale_y_continuous(expand = expansion(mult = c(0, 0.05)),
+                              guide = guide_axis(minor.ticks = TRUE)) + 
+           scale_x_continuous(guide = guide_axis(minor.ticks = TRUE)) +
+           scale_fill_manual(values = c("Randomly\npermuted\nclones" = "indianred4")) + 
+           scale_color_manual(values = c("Observed\n3 TCR\nchain\nclones" = "purple3"))
+
+ggsave("/home/ecb86/Desktop/ECLIPSE/revisions/figures/s3f.pdf", width = 2, height = 2, units = "in", device = cairo_pdf)   
+```
+
+```{r}
+############################################################################
+###                         Extended Data 3G                             ###
+############################################################################
+perm2_sim <- clusterPermutationTestSimilarChainsMissing(cd8s, tcr = df, minCells = 5, clusters = "ClusterName_TCells", assignment_matrix = assignment_matrix)
+
+perm_sim_diffs2 <- perm2_sim[[1]]
+mean_sim_diff2 <- perm2_sim[[2]]
+
+label2 <- case_when(sum(perm_sim_diffs2 <= mean_sim_diff2) == 0 ~ "p < 0.0001",
+                    sum(perm_sim_diffs2 <= mean_sim_diff2) != 0 ~ paste("p = ", sum(perm_sim_diffs2 <= mean_sim_diff2) / length(perm_sim_diffs2), sep = ""))
+
+
+ggplot() + geom_density(aes(x = perm_sim_diffs2, fill = "Randomly\npermuted\nclones"), color = "black", linewidth = 0.2, alpha = 0.3) + 
+           geom_vline(aes(xintercept = mean_sim_diff2, color = "Observed\nclones"), lwd = 0.5, linetype = "dotted") +
+           annotate("text", x = 0.85, y = 16.5, label = label2, size = 1.5) +
+           annotate("text", x = 0.5, y = 2, label = "Permuted\nclones", size = 1.5, lineheight = 0.8) +
+           annotate("text", x = 0.25, y = 13, label = "Observed\nclones", size = 1.5, lineheight = 0.8, hjust = 1) +
+           ggtitle("All clones") + 
+           theme_bw() +  
+           coord_cartesian(xlim = c(0, 1), clip = "off") + 
+           labs(x = "Intra-clone cluster\ndistribution dissimilarity", y = "Density", fill = "", color = "") +
+           theme(plot.title = element_text(hjust = 0.5, color = "black", size = 8), 
+                 axis.text = element_text(size = 6, color = "black"), 
+                 legend.margin = margin(r = 0, l = 0, t = -10, b = 2), 
+                 axis.title = element_text(size = 8, color = "black"), 
+                 plot.subtitle = element_text(hjust = 0.5, size = 6),
+                 legend.position = "none",
+                 plot.margin = unit(c(0.5, 0.5, 0.2, 0), "lines"), 
+                 axis.title.x = element_text(vjust = 0),
+                 panel.grid = element_blank(),
+                 panel.border = element_rect(linewidth = 0.3, color = "black"),
+                 axis.text.y = element_blank(),
+                 axis.ticks = element_line(linewidth = 0.3),
+                 axis.ticks.y = element_blank(),
+                 axis.ticks.length = unit(0.05, "cm")) +
+           scale_y_continuous(expand = expansion(mult = c(0, 0.05)),
+                              guide = guide_axis(minor.ticks = TRUE)) + 
+           scale_x_continuous(guide = guide_axis(minor.ticks = TRUE)) +
+           scale_fill_manual(values = c("Randomly\npermuted\nclones" = "darkcyan")) + 
+           scale_color_manual(values = c("Observed\nclones" = "darkorange3"))
+
+ggsave("/home/ecb86/Desktop/ECLIPSE/revisions/figures/s3g.pdf", width = 2, height = 2, units = "in", device = cairo_pdf)   
+```
+
+```{r}
+############################################################################
+###                         Extended Data 3H                             ###
+############################################################################
+matching2 <- matching %>% mutate(directory = str_replace(directory, "/.*$", ""))
+matching2 <- matching2 %>% mutate(directory = str_replace(directory, "-", "_"))
+
+rcc_trust4_rna <- compareTRUST4("/nfs/roberts/pi/pi_db2475/ecb86/ECLIPSE/revisions/trust4/RNA/rcc", cd8s, library = "RNA", max_dist = 0)
+rcc_trust4_tcr <- compareTRUST4("/nfs/roberts/pi/pi_db2475/ecb86/ECLIPSE/revisions/trust4/TCR/rcc", cd8s, library = "TCR", samples = matching2, max_dist = 0)
+rcc_mixcr_rna <- compareMiXCR("/nfs/roberts/pi/pi_db2475/ecb86/ECLIPSE/revisions/mixcr/RNA/rcc", cd8s, library = "RNA", max_dist = 0)
+rcc_mixcr_tcr <- compareMiXCR("/nfs/roberts/pi/pi_db2475/ecb86/ECLIPSE/revisions/mixcr/TCR/rcc", cd8s, library = "TCR", samples = matching2, max_dist = 0)
+
+
+rcc_trust4_rna2 <- rcc_trust4_rna[[2]] %>% select(-cell_id, -key)
+rcc_trust4_rna2$junction_aa_right_frame_ctaa <- NA
+rcc_trust4_rna2$junction_aa_right_frame_scr <- NA
+
+rcc_trust4_tcr2 <- rcc_trust4_tcr[[2]] %>% select(-cell_id, -key)
+rcc_trust4_tcr2$junction_aa_right_frame_ctaa <- NA
+rcc_trust4_tcr2$junction_aa_right_frame_scr <- NA
+
+rcc_mixcr_rna2 <- rcc_mixcr_rna[[2]] %>% select(-cell_id, -key, -junction_nt)
+rcc_mixcr_tcr2 <- rcc_mixcr_tcr[[2]] %>% select(-cell_id, -key, -junction_nt)
+
+final <- rbind(rcc_trust4_rna2, rcc_trust4_tcr2, rcc_mixcr_rna2, rcc_mixcr_tcr2)
+final$type = paste(final$method, final$library, sep = "\n")
+
+
+match <- final %>% filter(seq_pred == "not seq\npred")
+
+meta <- cd8s@meta.data %>% separate(CTaa, into = c("ctaa_a", "ctaa_b"), sep = "_", remove = FALSE)
+meta <- meta %>% separate(ctaa_a, into = c("ctaa_a1", "ctaa_a2"), sep = ":::", remove = TRUE) %>%
+                 separate(ctaa_b, into = c("ctaa_b1", "ctaa_b2"), sep = ":::", remove = TRUE)
+
+meta$ctaa_a1[meta$ctaa_a1 == "NA"] <- NA
+meta$ctaa_a2[meta$ctaa_a2 == "NA"] <- NA
+meta$ctaa_b1[meta$ctaa_b1 == "NA"] <- NA
+meta$ctaa_b2[meta$ctaa_b2 == "NA"] <- NA
+
+
+meta <- meta %>% filter(cloneCallSource == "VDJdive") %>%
+                 mutate(a1_pred = str_detect(scR_CTaa, paste0("^", ctaa_a1, "_|^", ctaa_a1, ";|;", ctaa_a1, "_")),
+                        a2_pred = str_detect(scR_CTaa, paste0("^", ctaa_a2, "_|^", ctaa_a2, ";|;", ctaa_a2, "_")),
+                        b1_pred = str_detect(scR_CTaa, paste0("_", ctaa_b1, "$|_", ctaa_b1, ";|;", ctaa_b1, "$")),
+                        b2_pred = str_detect(scR_CTaa, paste0("_", ctaa_b2, "$|_", ctaa_b2, ";|;", ctaa_b2, "$")))
+
+meta$a1_pred[is.na(meta$ctaa_a1)] <- FALSE
+meta$a2_pred[is.na(meta$ctaa_a2)] <- FALSE
+meta$b1_pred[is.na(meta$ctaa_b1)] <- FALSE
+meta$b2_pred[is.na(meta$ctaa_b2)] <- FALSE
+
+meta <- meta %>% rowwise() %>% mutate(chain_count = sum(!is.na(ctaa_a1), !is.na(ctaa_a2), !is.na(ctaa_b1), !is.na(ctaa_b2)))
+
+meta <- meta %>% rowwise() %>% mutate(existing_chains = sum(a1_pred, a2_pred, b1_pred, b2_pred),
+                                      predicted_chains = chain_count - sum(a1_pred, a2_pred, b1_pred, b2_pred))
+
+
+match <- match %>% unite("key", c(scR_CTaa, CTaa, donor), sep = " ", remove = FALSE)
+meta <- meta %>% unite("key", c(scR_CTaa, CTaa, donor), sep = " ", remove = FALSE)
+
+meta_pred <- meta %>% filter(predicted_chains > 0)
+
+meta_pred_large <- meta %>% filter(predicted_chains > 0) %>%
+                            group_by(scR_CTaa) %>%
+                            filter(n() >= 10) %>%
+                            ungroup() %>%
+                            group_by(donor, scR_CTaa, CTaa, key) %>%
+                            summarise(count = n())
+
+match2 <- match %>% group_by(key) %>%
+                    summarise(match_count = n(),
+                              cdr3s = paste(unique(junction_aa), collapse = " "),
+                              n_types = n_distinct(type),
+                              types = paste(unique(type), collapse = " "))
+
+match3 <- meta_pred_large %>% left_join(match2, by = "key")
+match3$n_types[is.na(match3$n_types)] <- 0
+match4 <- match3 %>% group_by(donor) %>%
+                     mutate(n_clones = n()) %>%
+                     group_by(donor, n_types) %>%
+                     summarise(pct = 100 * n() / dplyr::first(n_clones),
+                               subset_n = n(),
+                               num_clones = dplyr::first(n_clones)) %>%
+                     ungroup()
+
+match4 <- match4 %>% complete(donor, n_types)
+match4$pct[is.na(match4$pct)] <- 0
+match4$n_types = factor(match4$n_types)
+
+match4 <- match4 %>% group_by(donor) %>%
+                     arrange(desc(num_clones)) %>%
+                     mutate(num_clones = case_when(
+                                                   is.na(num_clones) ~ dplyr::first(num_clones),
+                                                   !is.na(num_clones) ~ num_clones)) %>%
+                     ungroup()
+
+
+match5 <- match4 %>% filter(num_clones >= 5)
+
+match_order <- match5 %>% group_by(donor) %>%
+                          summarise(count = pct[n_types == 0]) %>%
+                          arrange(count)
+
+rcc <- match5
+
+median(100 - rcc$pct[rcc$n_types == 0])
+
+
+### Mel now
+cd8so <- readRDS("/nfs/roberts/pi/pi_db2475/lab_data/sc_assays/oliveira_melanoma/processed/tils.CD8.R0.6.harmonized.20200422.rds")
+cd8so <- UpdateSeuratObject(cd8so)
+DimPlot(cd8so, label = TRUE)
+
+cd8so$seurat_barcode <- rownames(cd8so@meta.data)
+# cd8so$patient holds the patient info
+
+
+dirs <- list.dirs("/nfs/roberts/pi/pi_db2475/lab_data/sc_assays/oliveira_melanoma/raw/TCR/cellranger_output")
+dirs <- dirs[-1]
+
+matching <- data.frame("index" = 1:16, "dirs" = str_extract(dirs, "Pt.*$"))
+
+### This shows matching --> table(cd8s$sample, cd8s$patient)
+matching$sample <- c("TIL_pre_CD45pos_CD3pos-2", # Pt11 (PtC)_pre_CD45pos_CD3pos_2
+                     "TIL_pre_CD45pos_CD3pos-3", # Pt11 (PtC)_pre_CD45pos_CD3pos_3
+                     "TIL_pre_CD45pos_CD3pos-1", # Pt11 (PtC)_til_pre_CD45pos_CD3pos_1
+                     "TIL_rel-1", # Pt11 (PtC)_til_rel_1
+                     "TIL_rel-2", # Pt11 (PtC)_til_rel_2
+                     "TIL_CD45pos_CD3pos-1.rds", # Pt15 (PtD)TIL_CD45pos_CD3pos-1
+                     "TIL_CD45pos_CD3pos-2.rds", # Pt15 (PtD)TIL_CD45pos_CD3pos-2
+                     "TIL_CD45pos_CD3pos-3.rds", # Pt15 (PtD)TIL_CD45pos_CD3pos-3
+                     "TIL_CD45pos_CD3pos-4.rds", # Pt15 (PtD)TIL_CD45pos_CD3pos-4
+                     "TIL_CD45pos_CD3pos-1", # Pt2 (PtA)TIL_CD45pos_CD3pos-1
+                     "TIL_CD45pos_CD3pos-2", # Pt2 (PtA)TIL_CD45pos_CD3pos-2
+                     "TIL_CD45pos_CD3pos-3", # Pt2 (PtA)TIL_CD45pos_CD3pos-3
+                     "TIL_sel_1", # Pt6 (PtB)TIL_sel_1
+                     "TIL_sel_2", # Pt6 (PtB)TIL_sel_2
+                     "TIL_sel_3", # Pt6 (PtB)TIL_sel_3
+                     "TIL_sel_4") # Pt6 (PtB)TIL_sel_4
+
+cd8so@meta.data <- cd8so@meta.data %>% left_join(matching, by = "sample")
+
+cd8so@meta.data <- as.data.frame(cd8so@meta.data)
+rownames(cd8so@meta.data) <- cd8so$seurat_barcode
+
+cd8so$raw_barcode <- str_replace(cd8so$seurat_barcode, "^.*_", "")
+cd8so$raw_barcode <- str_replace(cd8so$raw_barcode, "-.*$", "-1")
+
+ocd8s <- ECLIPSE(contig_folder_path = dirs, 
+                 contig_type = "all", 
+                 seurat_object = cd8so, 
+                 batch = "index", 
+                 donor = "patient", 
+                 group = "patient", 
+                 original_barcode = "raw_barcode")
+
+ocd8s <- tcrDoubletDetect(ocd8s)
+
+ocd8s$Cell_barcode <- str_replace(rownames(ocd8s@meta.data), "^.*_", "")
+ocd8s@meta.data <- ocd8s@meta.data %>% mutate(Sample = case_when(
+                                                                 sample == "TIL_pre_CD45pos_CD3pos-1" ~ "pt11_1",
+                                                                 sample == "TIL_pre_CD45pos_CD3pos-2" ~ "pt11_2",
+                                                                 sample == "TIL_pre_CD45pos_CD3pos-3" ~ "pt11_3",
+                                                                 sample == "TIL_CD45pos_CD3pos-1.rds" ~ "pt15_1",
+                                                                 sample == "TIL_CD45pos_CD3pos-2.rds" ~ "pt15_2",
+                                                                 sample == "TIL_CD45pos_CD3pos-3.rds" ~ "pt15_3",
+                                                                 sample == "TIL_CD45pos_CD3pos-4.rds" ~ "pt15_4",
+                                                                 sample == "TIL_CD45pos_CD3pos-1" ~ "pt2_1",
+                                                                 sample == "TIL_CD45pos_CD3pos-2" ~ "pt2_2",
+                                                                 sample == "TIL_CD45pos_CD3pos-3" ~ "pt2_3",
+                                                                 TRUE ~ "Other"),
+                                              donor = patient)
+
+
+mel_trust4_rna <- compareTRUST4("/nfs/roberts/pi/pi_db2475/ecb86/ECLIPSE/revisions/trust4/RNA/mel", ocd8s, library = "RNA", max_dist = 0)
+mel_trust4_tcr <- compareTRUST4("/nfs/roberts/pi/pi_db2475/ecb86/ECLIPSE/revisions/trust4/TCR/mel", ocd8s, library = "TCR", max_dist = 0)
+mel_mixcr_rna <- compareMiXCR("/nfs/roberts/pi/pi_db2475/ecb86/ECLIPSE/revisions/mixcr/RNA/mel", ocd8s, library = "RNA", max_dist = 0)
+mel_mixcr_tcr <- compareMiXCR("/nfs/roberts/pi/pi_db2475/ecb86/ECLIPSE/revisions/mixcr/TCR/mel", ocd8s, library = "TCR", max_dist = 0)
+
+
+mel_trust4_rna2 <- mel_trust4_rna[[2]] %>% select(-cell_id, -key)
+mel_trust4_rna2$junction_aa_right_frame_ctaa <- NA
+mel_trust4_rna2$junction_aa_right_frame_scr <- NA
+
+mel_trust4_tcr2 <- mel_trust4_tcr[[2]] %>% select(-cell_id, -key)
+mel_trust4_tcr2$junction_aa_right_frame_ctaa <- NA
+mel_trust4_tcr2$junction_aa_right_frame_scr <- NA
+
+mel_mixcr_rna2 <- mel_mixcr_rna[[2]] %>% select(-cell_id, -key, -junction_nt)
+mel_mixcr_tcr2 <- mel_mixcr_tcr[[2]] %>% select(-cell_id, -key, -junction_nt)
+
+final <- rbind(mel_trust4_rna2, mel_trust4_tcr2, mel_mixcr_rna2, mel_mixcr_tcr2)
+final$type = paste(final$method, final$library, sep = "\n")
+
+
+match <- final %>% filter(seq_pred == "not seq\npred")
+
+meta <- ocd8s@meta.data %>% separate(CTaa, into = c("ctaa_a", "ctaa_b"), sep = "_", remove = FALSE)
+meta <- meta %>% separate(ctaa_a, into = c("ctaa_a1", "ctaa_a2"), sep = ":::", remove = TRUE) %>%
+                 separate(ctaa_b, into = c("ctaa_b1", "ctaa_b2"), sep = ":::", remove = TRUE)
+
+meta$ctaa_a1[meta$ctaa_a1 == "NA"] <- NA
+meta$ctaa_a2[meta$ctaa_a2 == "NA"] <- NA
+meta$ctaa_b1[meta$ctaa_b1 == "NA"] <- NA
+meta$ctaa_b2[meta$ctaa_b2 == "NA"] <- NA
+
+
+meta <- meta %>% filter(cloneCallSource == "VDJdive") %>%
+                 mutate(a1_pred = str_detect(scR_CTaa, paste0("^", ctaa_a1, "_|^", ctaa_a1, ";|;", ctaa_a1, "_")),
+                        a2_pred = str_detect(scR_CTaa, paste0("^", ctaa_a2, "_|^", ctaa_a2, ";|;", ctaa_a2, "_")),
+                        b1_pred = str_detect(scR_CTaa, paste0("_", ctaa_b1, "$|_", ctaa_b1, ";|;", ctaa_b1, "$")),
+                        b2_pred = str_detect(scR_CTaa, paste0("_", ctaa_b2, "$|_", ctaa_b2, ";|;", ctaa_b2, "$")))
+
+meta$a1_pred[is.na(meta$ctaa_a1)] <- FALSE
+meta$a2_pred[is.na(meta$ctaa_a2)] <- FALSE
+meta$b1_pred[is.na(meta$ctaa_b1)] <- FALSE
+meta$b2_pred[is.na(meta$ctaa_b2)] <- FALSE
+
+meta <- meta %>% rowwise() %>% mutate(chain_count = sum(!is.na(ctaa_a1), !is.na(ctaa_a2), !is.na(ctaa_b1), !is.na(ctaa_b2)))
+
+meta <- meta %>% rowwise() %>% mutate(existing_chains = sum(a1_pred, a2_pred, b1_pred, b2_pred),
+                                      predicted_chains = chain_count - sum(a1_pred, a2_pred, b1_pred, b2_pred))
+
+
+match <- match %>% unite("key", c(scR_CTaa, CTaa, donor), sep = " ", remove = FALSE)
+meta <- meta %>% unite("key", c(scR_CTaa, CTaa, donor), sep = " ", remove = FALSE)
+
+meta_pred <- meta %>% filter(predicted_chains > 0)
+
+meta_pred_large <- meta %>% filter(predicted_chains > 0) %>%
+                            group_by(scR_CTaa) %>%
+                            filter(n() >= 10) %>%
+                            ungroup()
+
+meta_pred_large <- meta %>% filter(predicted_chains > 0) %>%
+                            group_by(scR_CTaa) %>%
+                            filter(n() >= 10) %>%
+                            ungroup() %>%
+                            group_by(donor, scR_CTaa, CTaa, key) %>%
+                            summarise(count = n())
+
+match2 <- match %>% group_by(key) %>%
+                    summarise(match_count = n(),
+                              cdr3s = paste(unique(junction_aa), collapse = " "),
+                              n_types = n_distinct(type),
+                              types = paste(unique(type), collapse = " "))
+
+match3 <- meta_pred_large %>% left_join(match2, by = "key")
+match3$n_types[is.na(match3$n_types)] <- 0
+match4 <- match3 %>% group_by(donor) %>%
+                     mutate(n_clones = n()) %>%
+                     group_by(donor, n_types) %>%
+                     summarise(pct = 100 * n() / dplyr::first(n_clones),
+                               subset_n = n(),
+                               num_clones = dplyr::first(n_clones)) %>%
+                     ungroup()
+
+match4 <- match4 %>% complete(donor, n_types)
+match4$pct[is.na(match4$pct)] <- 0
+match4$n_types = factor(match4$n_types)
+
+match4 <- match4 %>% group_by(donor) %>%
+                     arrange(desc(num_clones)) %>%
+                     mutate(num_clones = case_when(
+                                                   is.na(num_clones) ~ dplyr::first(num_clones),
+                                                   !is.na(num_clones) ~ num_clones)) %>%
+                     ungroup()
+
+
+match5 <- match4 %>% filter(num_clones >= 5)
+
+match_order <- match5 %>% group_by(donor) %>%
+                          summarise(count = pct[n_types == 0]) %>%
+                          arrange(count)
+
+match5 %>% ggplot(aes(x = donor, y = pct)) +
+           geom_col(aes(fill = n_types)) +
+           scale_fill_manual(values = c("grey90", "skyblue", "dodgerblue", "blue", "navyblue")) +
+           theme_bw() +
+           theme(panel.grid = element_blank(),
+                 panel.border = element_rect(color = "black", linewidth = 0.7),
+                 axis.text = element_text(size = 12, color = "black"),
+                 axis.title = element_text(size = 16, color = "black")) +
+           scale_y_continuous(expand = c(0.01, 0.01)) +
+           labs(x = "Donor", y = "% of clones", fill = "Number of\ntypes of\nvalidation") +
+           scale_x_discrete(limits = match_order$donor)
+
+
+match5 %>% ggplot(aes(x = donor, y = pct)) +
+           geom_col(aes(fill = n_types)) +
+           scale_fill_manual(values = alpha("olivedrab4", c(0.1, 0.25, 0.5, 0.75, 1))) +
+           theme_bw() +
+           theme(panel.grid = element_blank(),
+                 panel.border = element_rect(color = "black", linewidth = 0.7),
+                 axis.text = element_text(size = 12, color = "black"),
+                 axis.title = element_text(size = 16, color = "black")) +
+           scale_y_continuous(expand = c(0.01, 0.01)) +
+           labs(x = "Donor", y = "% of clones", fill = "Number of\ntypes of\nvalidation") +
+           scale_x_discrete(limits = match_order$donor)
+
+mel <- match5
+
+median(100 - mel$pct[mel$n_types == 0])
+
+
+mel$cancer <- "Melanoma"
+rcc$cancer <- "Renal Cell Carcinoma"
+both_perf <- rbind(mel, rcc)
+mel_perf <- mel
+rcc_perf <- rcc
+both_order_perf <- both_perf %>% group_by(donor, cancer) %>%
+                                 summarise(count = pct[n_types == 0]) %>%
+                                 ungroup() %>%
+                                 group_by(cancer) %>%
+                                 mutate(pos = row_number())
+                 
+both_order_perf %>% group_by(cancer) %>%
+                    summarise(match_pct = 100 - median(count))
+
+both_perf$donor <- factor(both_perf$donor, levels = c("p2", "p11", "p15", "S1", "S2", "S3", "S6", "S5", "S15", "S11", "S7", "S16", "S12"))
+
+both_perf %>% filter(n_types != 0) %>%
+              ggplot(aes(x = donor, y = pct)) +
+              geom_col(aes(fill = n_types), ) +
+              scale_fill_manual(values = alpha("orange3", c(0.15, 0.3, 0.6, 1))) + 
+              theme_bw() +
+              theme(panel.grid = element_blank(),
+                    plot.title = element_text(size = 8, color = "black", hjust = 0.5),
+                    panel.border = element_rect(color = "black", linewidth = 0.5),
+                    axis.text = element_text(size = 6, color = "black"),
+                    axis.title = element_text(size = 8, color = "black"),
+                    strip.text = element_text(size = 6, color = "black"),
+                    strip.background = element_rect(linewidth = 1),
+                    axis.ticks = element_line(linewidth = 0.3),
+                    axis.ticks.length = unit(0.05, "cm"),
+                    axis.ticks.x = element_blank(),
+                    legend.text = element_text(size = 6),
+                    legend.key.size = unit("0.3", "cm"),
+                    legend.box.margin = margin(r = -3, l = -3),
+                    legend.margin = margin(r = -3, l = -3),
+                    legend.title = element_text(size = 8, color = "black", hjust = 0.5),
+                    axis.text.y = element_text(margin = margin(r = 1)),
+                    axis.text.x = element_blank(),
+                    strip.background.x = element_rect(linewidth = 0.5)) +
+              scale_y_continuous(expand = c(0.015, 0.015),
+                                 guide = guide_axis(minor.ticks = TRUE)) +
+              scale_x_discrete(expand = expansion(add = 0.7)) +
+              labs(x = "Patient", y = "% of clones", fill = "# of\ntypes of\nvalidation", title = "Perfect matching") +
+              facet_grid(. ~ cancer, scales = "free_x", space = "free_x", labeller = as_labeller(c("Melanoma" = "Melanoma", "Renal Cell Carcinoma" = "Renal cell carcinoma")))
+
+
+ggsave("/home/ecb86/Desktop/ECLIPSE/revisions/figures/s3h.pdf", width = 3, height = 2, units = "in", device = cairo_pdf)  
+```
+
+```{r}
+############################################################################
+###                             Figure 4I                                ###
+############################################################################
+matching2 <- matching %>% mutate(directory = str_replace(directory, "/.*$", ""))
+matching2 <- matching2 %>% mutate(directory = str_replace(directory, "-", "_"))
+
+rcc_trust4_rna <- compareTRUST4("/nfs/roberts/pi/pi_db2475/ecb86/ECLIPSE/revisions/trust4/RNA/rcc", cd8s, library = "RNA", max_dist = 0.4)
+rcc_trust4_tcr <- compareTRUST4("/nfs/roberts/pi/pi_db2475/ecb86/ECLIPSE/revisions/trust4/TCR/rcc", cd8s, library = "TCR", samples = matching2, max_dist = 0.4)
+rcc_mixcr_rna <- compareMiXCR("/nfs/roberts/pi/pi_db2475/ecb86/ECLIPSE/revisions/mixcr/RNA/rcc", cd8s, library = "RNA", max_dist = 0.4)
+rcc_mixcr_tcr <- compareMiXCR("/nfs/roberts/pi/pi_db2475/ecb86/ECLIPSE/revisions/mixcr/TCR/rcc", cd8s, library = "TCR", samples = matching2, max_dist = 0.4)
+
+
+rcc_trust4_rna2 <- rcc_trust4_rna[[2]] %>% select(-cell_id, -key)
+rcc_trust4_rna2$junction_aa_right_frame_ctaa <- NA
+rcc_trust4_rna2$junction_aa_right_frame_scr <- NA
+
+rcc_trust4_tcr2 <- rcc_trust4_tcr[[2]] %>% select(-cell_id, -key)
+rcc_trust4_tcr2$junction_aa_right_frame_ctaa <- NA
+rcc_trust4_tcr2$junction_aa_right_frame_scr <- NA
+
+rcc_mixcr_rna2 <- rcc_mixcr_rna[[2]] %>% select(-cell_id, -key, -junction_nt)
+rcc_mixcr_tcr2 <- rcc_mixcr_tcr[[2]] %>% select(-cell_id, -key, -junction_nt)
+
+final <- rbind(rcc_trust4_rna2, rcc_trust4_tcr2, rcc_mixcr_rna2, rcc_mixcr_tcr2)
+final$type = paste(final$method, final$library, sep = "\n")
+
+
+match <- final %>% filter(seq_pred == "not seq\npred")
+
+meta <- cd8s@meta.data %>% separate(CTaa, into = c("ctaa_a", "ctaa_b"), sep = "_", remove = FALSE)
+meta <- meta %>% separate(ctaa_a, into = c("ctaa_a1", "ctaa_a2"), sep = ":::", remove = TRUE) %>%
+                 separate(ctaa_b, into = c("ctaa_b1", "ctaa_b2"), sep = ":::", remove = TRUE)
+
+meta$ctaa_a1[meta$ctaa_a1 == "NA"] <- NA
+meta$ctaa_a2[meta$ctaa_a2 == "NA"] <- NA
+meta$ctaa_b1[meta$ctaa_b1 == "NA"] <- NA
+meta$ctaa_b2[meta$ctaa_b2 == "NA"] <- NA
+
+
+meta <- meta %>% filter(cloneCallSource == "VDJdive") %>%
+                 mutate(a1_pred = str_detect(scR_CTaa, paste0("^", ctaa_a1, "_|^", ctaa_a1, ";|;", ctaa_a1, "_")),
+                        a2_pred = str_detect(scR_CTaa, paste0("^", ctaa_a2, "_|^", ctaa_a2, ";|;", ctaa_a2, "_")),
+                        b1_pred = str_detect(scR_CTaa, paste0("_", ctaa_b1, "$|_", ctaa_b1, ";|;", ctaa_b1, "$")),
+                        b2_pred = str_detect(scR_CTaa, paste0("_", ctaa_b2, "$|_", ctaa_b2, ";|;", ctaa_b2, "$")))
+
+meta$a1_pred[is.na(meta$ctaa_a1)] <- FALSE
+meta$a2_pred[is.na(meta$ctaa_a2)] <- FALSE
+meta$b1_pred[is.na(meta$ctaa_b1)] <- FALSE
+meta$b2_pred[is.na(meta$ctaa_b2)] <- FALSE
+
+meta <- meta %>% rowwise() %>% mutate(chain_count = sum(!is.na(ctaa_a1), !is.na(ctaa_a2), !is.na(ctaa_b1), !is.na(ctaa_b2)))
+
+meta <- meta %>% rowwise() %>% mutate(existing_chains = sum(a1_pred, a2_pred, b1_pred, b2_pred),
+                                      predicted_chains = chain_count - sum(a1_pred, a2_pred, b1_pred, b2_pred))
+
+
+match <- match %>% unite("key", c(scR_CTaa, CTaa, donor), sep = " ", remove = FALSE)
+meta <- meta %>% unite("key", c(scR_CTaa, CTaa, donor), sep = " ", remove = FALSE)
+
+meta_pred <- meta %>% filter(predicted_chains > 0)
+
+meta_pred_large <- meta %>% filter(predicted_chains > 0) %>%
+                            group_by(scR_CTaa) %>%
+                            filter(n() >= 10) %>%
+                            ungroup() %>%
+                            group_by(donor, scR_CTaa, CTaa, key) %>%
+                            summarise(count = n())
+
+match2 <- match %>% group_by(key) %>%
+                    summarise(match_count = n(),
+                              cdr3s = paste(unique(junction_aa), collapse = " "),
+                              n_types = n_distinct(type),
+                              types = paste(unique(type), collapse = " "))
+
+match3 <- meta_pred_large %>% left_join(match2, by = "key")
+match3$n_types[is.na(match3$n_types)] <- 0
+match4 <- match3 %>% group_by(donor) %>%
+                     mutate(n_clones = n()) %>%
+                     group_by(donor, n_types) %>%
+                     summarise(pct = 100 * n() / dplyr::first(n_clones),
+                               subset_n = n(),
+                               num_clones = dplyr::first(n_clones)) %>%
+                     ungroup()
+
+match4 <- match4 %>% complete(donor, n_types)
+match4$pct[is.na(match4$pct)] <- 0
+match4$n_types = factor(match4$n_types)
+
+match4 <- match4 %>% group_by(donor) %>%
+                     arrange(desc(num_clones)) %>%
+                     mutate(num_clones = case_when(
+                                                   is.na(num_clones) ~ dplyr::first(num_clones),
+                                                   !is.na(num_clones) ~ num_clones)) %>%
+                     ungroup()
+
+
+match5 <- match4 %>% filter(num_clones >= 5)
+
+match_order <- match5 %>% group_by(donor) %>%
+                          summarise(count = pct[n_types == 0]) %>%
+                          arrange(count)
+
+rcc <- match5
+
+median(100 - rcc$pct[rcc$n_types == 0])
+
+
+### Mel now
+cd8so <- readRDS("/nfs/roberts/pi/pi_db2475/lab_data/sc_assays/oliveira_melanoma/processed/tils.CD8.R0.6.harmonized.20200422.rds")
+cd8so <- UpdateSeuratObject(cd8so)
+DimPlot(cd8so, label = TRUE)
+
+cd8so$seurat_barcode <- rownames(cd8so@meta.data)
+# cd8so$patient holds the patient info
+
+
+dirs <- list.dirs("/nfs/roberts/pi/pi_db2475/lab_data/sc_assays/oliveira_melanoma/raw/TCR/cellranger_output")
+dirs <- dirs[-1]
+
+matching <- data.frame("index" = 1:16, "dirs" = str_extract(dirs, "Pt.*$"))
+
+### This shows matching --> table(cd8s$sample, cd8s$patient)
+matching$sample <- c("TIL_pre_CD45pos_CD3pos-2", # Pt11 (PtC)_pre_CD45pos_CD3pos_2
+                     "TIL_pre_CD45pos_CD3pos-3", # Pt11 (PtC)_pre_CD45pos_CD3pos_3
+                     "TIL_pre_CD45pos_CD3pos-1", # Pt11 (PtC)_til_pre_CD45pos_CD3pos_1
+                     "TIL_rel-1", # Pt11 (PtC)_til_rel_1
+                     "TIL_rel-2", # Pt11 (PtC)_til_rel_2
+                     "TIL_CD45pos_CD3pos-1.rds", # Pt15 (PtD)TIL_CD45pos_CD3pos-1
+                     "TIL_CD45pos_CD3pos-2.rds", # Pt15 (PtD)TIL_CD45pos_CD3pos-2
+                     "TIL_CD45pos_CD3pos-3.rds", # Pt15 (PtD)TIL_CD45pos_CD3pos-3
+                     "TIL_CD45pos_CD3pos-4.rds", # Pt15 (PtD)TIL_CD45pos_CD3pos-4
+                     "TIL_CD45pos_CD3pos-1", # Pt2 (PtA)TIL_CD45pos_CD3pos-1
+                     "TIL_CD45pos_CD3pos-2", # Pt2 (PtA)TIL_CD45pos_CD3pos-2
+                     "TIL_CD45pos_CD3pos-3", # Pt2 (PtA)TIL_CD45pos_CD3pos-3
+                     "TIL_sel_1", # Pt6 (PtB)TIL_sel_1
+                     "TIL_sel_2", # Pt6 (PtB)TIL_sel_2
+                     "TIL_sel_3", # Pt6 (PtB)TIL_sel_3
+                     "TIL_sel_4") # Pt6 (PtB)TIL_sel_4
+
+cd8so@meta.data <- cd8so@meta.data %>% left_join(matching, by = "sample")
+
+cd8so@meta.data <- as.data.frame(cd8so@meta.data)
+rownames(cd8so@meta.data) <- cd8so$seurat_barcode
+
+cd8so$raw_barcode <- str_replace(cd8so$seurat_barcode, "^.*_", "")
+cd8so$raw_barcode <- str_replace(cd8so$raw_barcode, "-.*$", "-1")
+
+ocd8s <- ECLIPSE(contig_folder_path = dirs, 
+                 contig_type = "all", 
+                 seurat_object = cd8so, 
+                 batch = "index", 
+                 donor = "patient", 
+                 group = "patient", 
+                 original_barcode = "raw_barcode")
+
+ocd8s <- tcrDoubletDetect(ocd8s)
+
+ocd8s$Cell_barcode <- str_replace(rownames(ocd8s@meta.data), "^.*_", "")
+ocd8s@meta.data <- ocd8s@meta.data %>% mutate(Sample = case_when(
+                                                                 sample == "TIL_pre_CD45pos_CD3pos-1" ~ "pt11_1",
+                                                                 sample == "TIL_pre_CD45pos_CD3pos-2" ~ "pt11_2",
+                                                                 sample == "TIL_pre_CD45pos_CD3pos-3" ~ "pt11_3",
+                                                                 sample == "TIL_CD45pos_CD3pos-1.rds" ~ "pt15_1",
+                                                                 sample == "TIL_CD45pos_CD3pos-2.rds" ~ "pt15_2",
+                                                                 sample == "TIL_CD45pos_CD3pos-3.rds" ~ "pt15_3",
+                                                                 sample == "TIL_CD45pos_CD3pos-4.rds" ~ "pt15_4",
+                                                                 sample == "TIL_CD45pos_CD3pos-1" ~ "pt2_1",
+                                                                 sample == "TIL_CD45pos_CD3pos-2" ~ "pt2_2",
+                                                                 sample == "TIL_CD45pos_CD3pos-3" ~ "pt2_3",
+                                                                 TRUE ~ "Other"),
+                                              donor = patient)
+
+
+mel_trust4_rna <- compareTRUST4("/nfs/roberts/pi/pi_db2475/ecb86/ECLIPSE/revisions/trust4/RNA/mel", ocd8s, library = "RNA", max_dist = 0.4)
+mel_trust4_tcr <- compareTRUST4("/nfs/roberts/pi/pi_db2475/ecb86/ECLIPSE/revisions/trust4/TCR/mel", ocd8s, library = "TCR", max_dist = 0.4)
+mel_mixcr_rna <- compareMiXCR("/nfs/roberts/pi/pi_db2475/ecb86/ECLIPSE/revisions/mixcr/RNA/mel", ocd8s, library = "RNA", max_dist = 0.4)
+mel_mixcr_tcr <- compareMiXCR("/nfs/roberts/pi/pi_db2475/ecb86/ECLIPSE/revisions/mixcr/TCR/mel", ocd8s, library = "TCR", max_dist = 0.4)
+
+
+mel_trust4_rna2 <- mel_trust4_rna[[2]] %>% select(-cell_id, -key)
+mel_trust4_rna2$junction_aa_right_frame_ctaa <- NA
+mel_trust4_rna2$junction_aa_right_frame_scr <- NA
+
+mel_trust4_tcr2 <- mel_trust4_tcr[[2]] %>% select(-cell_id, -key)
+mel_trust4_tcr2$junction_aa_right_frame_ctaa <- NA
+mel_trust4_tcr2$junction_aa_right_frame_scr <- NA
+
+mel_mixcr_rna2 <- mel_mixcr_rna[[2]] %>% select(-cell_id, -key, -junction_nt)
+mel_mixcr_tcr2 <- mel_mixcr_tcr[[2]] %>% select(-cell_id, -key, -junction_nt)
+
+final <- rbind(mel_trust4_rna2, mel_trust4_tcr2, mel_mixcr_rna2, mel_mixcr_tcr2)
+final$type = paste(final$method, final$library, sep = "\n")
+
+
+match <- final %>% filter(seq_pred == "not seq\npred")
+
+meta <- ocd8s@meta.data %>% separate(CTaa, into = c("ctaa_a", "ctaa_b"), sep = "_", remove = FALSE)
+meta <- meta %>% separate(ctaa_a, into = c("ctaa_a1", "ctaa_a2"), sep = ":::", remove = TRUE) %>%
+                 separate(ctaa_b, into = c("ctaa_b1", "ctaa_b2"), sep = ":::", remove = TRUE)
+
+meta$ctaa_a1[meta$ctaa_a1 == "NA"] <- NA
+meta$ctaa_a2[meta$ctaa_a2 == "NA"] <- NA
+meta$ctaa_b1[meta$ctaa_b1 == "NA"] <- NA
+meta$ctaa_b2[meta$ctaa_b2 == "NA"] <- NA
+
+
+meta <- meta %>% filter(cloneCallSource == "VDJdive") %>%
+                 mutate(a1_pred = str_detect(scR_CTaa, paste0("^", ctaa_a1, "_|^", ctaa_a1, ";|;", ctaa_a1, "_")),
+                        a2_pred = str_detect(scR_CTaa, paste0("^", ctaa_a2, "_|^", ctaa_a2, ";|;", ctaa_a2, "_")),
+                        b1_pred = str_detect(scR_CTaa, paste0("_", ctaa_b1, "$|_", ctaa_b1, ";|;", ctaa_b1, "$")),
+                        b2_pred = str_detect(scR_CTaa, paste0("_", ctaa_b2, "$|_", ctaa_b2, ";|;", ctaa_b2, "$")))
+
+meta$a1_pred[is.na(meta$ctaa_a1)] <- FALSE
+meta$a2_pred[is.na(meta$ctaa_a2)] <- FALSE
+meta$b1_pred[is.na(meta$ctaa_b1)] <- FALSE
+meta$b2_pred[is.na(meta$ctaa_b2)] <- FALSE
+
+meta <- meta %>% rowwise() %>% mutate(chain_count = sum(!is.na(ctaa_a1), !is.na(ctaa_a2), !is.na(ctaa_b1), !is.na(ctaa_b2)))
+
+meta <- meta %>% rowwise() %>% mutate(existing_chains = sum(a1_pred, a2_pred, b1_pred, b2_pred),
+                                      predicted_chains = chain_count - sum(a1_pred, a2_pred, b1_pred, b2_pred))
+
+
+match <- match %>% unite("key", c(scR_CTaa, CTaa, donor), sep = " ", remove = FALSE)
+meta <- meta %>% unite("key", c(scR_CTaa, CTaa, donor), sep = " ", remove = FALSE)
+
+meta_pred <- meta %>% filter(predicted_chains > 0)
+
+meta_pred_large <- meta %>% filter(predicted_chains > 0) %>%
+                            group_by(scR_CTaa) %>%
+                            filter(n() >= 10) %>%
+                            ungroup()
+
+meta_pred_large <- meta %>% filter(predicted_chains > 0) %>%
+                            group_by(scR_CTaa) %>%
+                            filter(n() >= 10) %>%
+                            ungroup() %>%
+                            group_by(donor, scR_CTaa, CTaa, key) %>%
+                            summarise(count = n())
+
+match2 <- match %>% group_by(key) %>%
+                    summarise(match_count = n(),
+                              cdr3s = paste(unique(junction_aa), collapse = " "),
+                              n_types = n_distinct(type),
+                              types = paste(unique(type), collapse = " "))
+
+match3 <- meta_pred_large %>% left_join(match2, by = "key")
+match3$n_types[is.na(match3$n_types)] <- 0
+match4 <- match3 %>% group_by(donor) %>%
+                     mutate(n_clones = n()) %>%
+                     group_by(donor, n_types) %>%
+                     summarise(pct = 100 * n() / dplyr::first(n_clones),
+                               subset_n = n(),
+                               num_clones = dplyr::first(n_clones)) %>%
+                     ungroup()
+
+match4 <- match4 %>% complete(donor, n_types)
+match4$pct[is.na(match4$pct)] <- 0
+match4$n_types = factor(match4$n_types)
+
+match4 <- match4 %>% group_by(donor) %>%
+                     arrange(desc(num_clones)) %>%
+                     mutate(num_clones = case_when(
+                                                   is.na(num_clones) ~ dplyr::first(num_clones),
+                                                   !is.na(num_clones) ~ num_clones)) %>%
+                     ungroup()
+
+
+match5 <- match4 %>% filter(num_clones >= 5)
+
+match_order <- match5 %>% group_by(donor) %>%
+                          summarise(count = pct[n_types == 0]) %>%
+                          arrange(count)
+
+match5 %>% ggplot(aes(x = donor, y = pct)) +
+           geom_col(aes(fill = n_types)) +
+           scale_fill_manual(values = c("grey90", "skyblue", "dodgerblue", "blue", "navyblue")) +
+           theme_bw() +
+           theme(panel.grid = element_blank(),
+                 panel.border = element_rect(color = "black", linewidth = 0.7),
+                 axis.text = element_text(size = 12, color = "black"),
+                 axis.title = element_text(size = 16, color = "black")) +
+           scale_y_continuous(expand = c(0.01, 0.01)) +
+           labs(x = "Donor", y = "% of clones", fill = "Number of\ntypes of\nvalidation") +
+           scale_x_discrete(limits = match_order$donor)
+
+
+match5 %>% ggplot(aes(x = donor, y = pct)) +
+           geom_col(aes(fill = n_types)) +
+           scale_fill_manual(values = alpha("olivedrab4", c(0.1, 0.25, 0.5, 0.75, 1))) +
+           theme_bw() +
+           theme(panel.grid = element_blank(),
+                 panel.border = element_rect(color = "black", linewidth = 0.7),
+                 axis.text = element_text(size = 12, color = "black"),
+                 axis.title = element_text(size = 16, color = "black")) +
+           scale_y_continuous(expand = c(0.01, 0.01)) +
+           labs(x = "Donor", y = "% of clones", fill = "Number of\ntypes of\nvalidation") +
+           scale_x_discrete(limits = match_order$donor)
+
+mel <- match5
+
+median(100 - mel$pct[mel$n_types == 0])
+
+
+mel$cancer <- "Melanoma"
+rcc$cancer <- "Renal Cell Carcinoma"
+both_lev <- rbind(mel, rcc)
+mel_lev <- mel
+rcc_lev <- rcc
+both_order_lev <- both_lev %>% group_by(donor, cancer) %>%
+                               summarise(count = pct[n_types == 0]) %>%
+                               ungroup() %>%
+                               group_by(cancer) %>%
+                               mutate(pos = row_number())
+
+both_order_lev %>% group_by(cancer) %>%
+                   summarise(match_pct = 100 - median(count))
+                 
+both_lev$donor <- factor(both_lev$donor, levels = c("p2", "p11", "p15", "S1", "S3", "S2", "S6", "S15", "S5", "S16", "S7", "S11", "S12"))
+    
+both_lev %>% filter(n_types != 0) %>%
+             ggplot(aes(x = donor, y = pct)) +
+             geom_col(aes(fill = n_types), ) +
+             scale_fill_manual(values = alpha("orange3", c(0.15, 0.3, 0.6, 1))) + 
+             theme_bw() +
+             theme(panel.grid = element_blank(),
+                   plot.title = element_text(size = 8, color = "black", hjust = 0.5),
+                   panel.border = element_rect(color = "black", linewidth = 0.5),
+                   axis.text = element_text(size = 6, color = "black"),
+                   axis.title = element_text(size = 8, color = "black"),
+                   strip.text = element_text(size = 6, color = "black"),
+                   strip.background = element_rect(linewidth = 1),
+                   axis.ticks = element_line(linewidth = 0.3),
+                   axis.ticks.length = unit(0.05, "cm"),
+                   axis.ticks.x = element_blank(),
+                   legend.text = element_text(size = 6),
+                   legend.key.size = unit("0.3", "cm"),
+                   legend.box.margin = margin(r = -3, l = -3),
+                   legend.margin = margin(r = -3, l = -3),
+                   legend.title = element_text(size = 8, color = "black", hjust = 0.5),
+                   axis.text.y = element_text(margin = margin(r = 1)),
+                   axis.text.x = element_blank(),
+                   strip.background.x = element_rect(linewidth = 0.5)) +
+             scale_y_continuous(expand = c(0.015, 0.015),
+                                guide = guide_axis(minor.ticks = TRUE)) +
+             scale_x_discrete(expand = expansion(add = 0.7)) +
+             labs(x = "Patient", y = "% of clones", fill = "# of\ntypes of\nvalidation", title = "Levenshtein distance matching") +
+             facet_grid(. ~ cancer, scales = "free_x", space = "free_x", labeller = as_labeller(c("Melanoma" = "Melanoma", "Renal Cell Carcinoma" = "Renal cell carcinoma")))
+
+ggsave("/home/ecb86/Desktop/ECLIPSE/revisions/figures/4h.pdf", width = 3, height = 3, units = "in", device = cairo_pdf) 
+
+
+### Stats
+both_lev %>% filter(n_types != 0) %>%
+             group_by(donor, cancer) %>%
+             summarise(total_pct = sum(pct)) %>% 
+             ungroup() %>%
+             group_by(cancer) %>%
+             summarise(md = median(total_pct))
+             
+```
+
